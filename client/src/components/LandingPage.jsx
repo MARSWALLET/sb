@@ -80,7 +80,7 @@ export default function LandingPage() {
       if (dateTo)   params.set('dateTo', formatForApi(dateTo));
       
       console.log(`[LandingPage] Fetching results page=${p} league=${leagueFilter || 'ALL'}`);
-      const res = await fetch(`http://localhost:3001/api/public/results?${params}`);
+      const res = await fetch(`/api/public/results?${params}`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Unknown server error');
       console.log(`[LandingPage] Got ${json.dates.length} date blocks, totalDates=${json.totalDates}`);
@@ -136,7 +136,7 @@ export default function LandingPage() {
     console.log(`[LandingPage] Requesting AI Analysis scope=${scope} for ${date}`);
 
     try {
-      const res = await fetch('http://localhost:3001/api/analyze', {
+      const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

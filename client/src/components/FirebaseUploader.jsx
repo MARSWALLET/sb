@@ -55,7 +55,7 @@ export default function FirebaseUploader({ active }) {
   const loadScreenshots = useCallback(async () => {
     setLoadingList(true);
     try {
-      const res = await fetch('http://localhost:3001/api/screenshots');
+      const res = await fetch('/api/screenshots');
       const data = await res.json();
       if (data.success) {
         setScreenshots(data.screenshots);
@@ -79,7 +79,7 @@ export default function FirebaseUploader({ active }) {
     console.log(`[FirebaseUploader] Deleting screenshot: ${img.filename}`);
     setDeletingFile(img.filename);
     try {
-      const res = await fetch(`http://localhost:3001/api/screenshots/${encodeURIComponent(img.filename)}`, {
+      const res = await fetch(`/api/screenshots/${encodeURIComponent(img.filename)}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -117,7 +117,7 @@ export default function FirebaseUploader({ active }) {
     const addLog = (msg) => setSyncLogs(prev => [...prev, msg]);
     console.log('[FirebaseUploader] Starting local DB → Firebase sync, filter:', leagueFilter || 'ALL');
     try {
-      const res = await fetch('http://localhost:3001/api/sync-local-to-firebase', {
+      const res = await fetch('/api/sync-local-to-firebase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(leagueFilter ? { leagueFilter } : {}),
@@ -161,7 +161,7 @@ export default function FirebaseUploader({ active }) {
     console.log(`[FirebaseUploader] Starting pipeline for: ${selectedImg.filename} force=${forceUpload}`);
 
     try {
-      const response = await fetch('http://localhost:3001/api/extract-and-upload', {
+      const response = await fetch('/api/extract-and-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // Auto-use dbLeague from metadata, fall back to manual selection
@@ -275,7 +275,7 @@ export default function FirebaseUploader({ active }) {
             </button>
           </div>
           <img
-            src={`http://localhost:3001/api/screenshot-preview/${encodeURIComponent(previewImg.filename)}`}
+            src={`/api/screenshot-preview/${encodeURIComponent(previewImg.filename)}`}
             alt={previewImg.filename}
             onClick={e => e.stopPropagation()}
             style={{ maxWidth: '90vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: '10px', boxShadow: '0 20px 60px rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)' }}
@@ -432,7 +432,7 @@ export default function FirebaseUploader({ active }) {
                     }}
                   >
                     <img
-                      src={`http://localhost:3001/api/screenshot-preview/${encodeURIComponent(img.filename)}`}
+                      src={`/api/screenshot-preview/${encodeURIComponent(img.filename)}`}
                       alt="preview"
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={e => { e.target.style.display = 'none'; }}
@@ -556,7 +556,7 @@ export default function FirebaseUploader({ active }) {
               }}
             >
               <img
-                src={`http://localhost:3001/api/screenshot-preview/${encodeURIComponent(selectedImg.filename)}`}
+                src={`/api/screenshot-preview/${encodeURIComponent(selectedImg.filename)}`}
                 alt="Screenshot preview"
                 style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }}
                 onError={e => { e.target.style.display = 'none'; }}
@@ -620,7 +620,7 @@ export default function FirebaseUploader({ active }) {
               if (!window.confirm('Clear the visual hash database? Screenshots will no longer be blocked as "visually similar". Match data is safe.')) return;
               setResettingHashes(true);
               try {
-                const res = await fetch('http://localhost:3001/api/reset-visual-hashes', { method: 'POST' });
+                const res = await fetch('/api/reset-visual-hashes', { method: 'POST' });
                 const data = await res.json();
                 if (data.success) {
                   console.log('[FirebaseUploader] Visual hashes reset:', data.message);

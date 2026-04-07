@@ -8,7 +8,7 @@ export default function AILog() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('http://localhost:3001/api/ai-memory')
+    fetch('/api/ai-memory')
       .then(res => res.json())
       .then(data => {
         if (data.success) setLogs(data.log);

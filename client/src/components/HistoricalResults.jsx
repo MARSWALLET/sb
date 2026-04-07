@@ -49,7 +49,7 @@ export default function HistoricalResults() {
   // Poll for pending (unprocessed) screenshot count
   const checkPending = useCallback(async () => {
     try {
-      const res = await fetch('http://localhost:3001/api/screenshots');
+      const res = await fetch('/api/screenshots');
       const data = await res.json();
       if (data.success) {
         setPendingCount(data.screenshots.filter(s => s.isNew).length);
@@ -78,7 +78,7 @@ export default function HistoricalResults() {
     try {
       const params = new URLSearchParams({ league: selectedLeague });
       if (targetDate) params.append('date', targetDate);
-      const response = await fetch(`http://localhost:3001/api/vfootball/screenshot-results?${params}`);
+      const response = await fetch(`/api/vfootball/screenshot-results?${params}`);
 
       if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
       const data = await response.json();
@@ -128,7 +128,7 @@ export default function HistoricalResults() {
     console.log('[HistoricalResults] Starting inline Firebase upload pipeline...');
 
     try {
-      const response = await fetch('http://localhost:3001/api/extract-and-upload', {
+      const response = await fetch('/api/extract-and-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imagePath: uploadReady.path, leagueName: uploadReady.league }),

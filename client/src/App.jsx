@@ -20,7 +20,7 @@ function AdminDashboard() {
     if (activeTab === 'live') {
       const fetchScores = async () => {
         try {
-          const response = await fetch('http://localhost:3001/api/scores');
+          const response = await fetch('/api/scores');
           if (!response.ok) throw new Error('Server error');
           const data = await response.json();
           if (data.success) { setScores(data.data); setError(null); }
