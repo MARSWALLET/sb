@@ -1,0 +1,25 @@
+# Environment secrets — NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# Firebase service account key — contains private credentials
+serviceAccountKey.json
+
+# Node modules
+node_modules/
+
+# Output files (can be regenerated)
+processed_images_hash.json
+processed_visual_hashes.json
+extracted_league_data.json
+
+# Screenshots cache
+testdownloadpage/
+
+# Tesseract language data
+*.traineddata
+
+# Logs
+*.log
+ocr_output.txt

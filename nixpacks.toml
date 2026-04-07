@@ -1,0 +1,14 @@
+# Railway Nixpacks build config
+# Uses Node 20 + system Chromium so Puppeteer works on Railway's Linux container
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "chromium", "nss", "freetype", "harfbuzz", "ca-certificates", "ttf-dejavu"]
+
+[phases.install]
+cmds = ["cd server && npm install"]
+
+[phases.build]
+cmds = ["cd server && npm run build"]
+
+[start]
+cmd = "cd server && node index.js"

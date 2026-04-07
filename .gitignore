@@ -1,0 +1,43 @@
+# ── Node ──────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Environment secrets — NEVER commit these ──────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Firebase service account key — contains private credentials
+server/serviceAccountKey.json
+
+# ── Built output ───────────────────────────────────────────────
+client/dist/
+server/public/
+
+# ── Runtime data files (regenerated at runtime) ────────────────
+server/processed_images_hash.json
+server/processed_visual_hashes.json
+server/extracted_league_data.json
+server/ai_analysis_log.json
+
+# ── Screenshots cache ──────────────────────────────────────────
+server/testdownloadpage/
+
+# ── Tesseract language data (large binary) ─────────────────────
+*.traineddata
+
+# ── Logs ───────────────────────────────────────────────────────
+*.log
+server/ocr_output.txt
+
+# ── Dev scratch files ──────────────────────────────────────────
+server/test-gemini.js
+server/test-gemini2.js
+server/list_models.js
+server/list_models_filtered.js
+
+# ── OS ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
