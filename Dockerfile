@@ -61,6 +61,6 @@ COPY --from=client-builder /app/client/dist ./public
 # Railway injects PORT at runtime
 ENV NODE_ENV=production
 
-EXPOSE 3000
+EXPOSE 3001
 
 CMD ["node", "index.js"]

@@ -914,7 +914,7 @@ if (fs.existsSync(PUBLIC_DIR)) {
 }
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`[DEBUG] [Server] Express API running on port ${PORT}`);
     console.log(`[DEBUG] [Server] Endpoints:`);
     console.log(`[DEBUG] [Server]   GET /api/scores               → live vFootball odds`);
