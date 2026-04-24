@@ -3370,13 +3370,13 @@ Historical Next Match Outcomes (Sample: ${m.pattern.sampleSize}):
 ${m.pattern.eliteOutcomes.map(o => `- ${o.label}: ${o.pct}% probability`).join('\n')}
 `).join('\n');
 
-        const prompt = \`
+        const prompt = `
 You are an elite sports betting algorithmic analyst. 
-I am providing you with the top \${finalMatches.length} mathematically backed predictions for fixtures starting in the NEXT 5 MINUTES.
+I am providing you with the top ${finalMatches.length} mathematically backed predictions for fixtures starting in the NEXT 5 MINUTES.
 Your task is to analyze these upcoming fixtures based on the historical pattern data.
 
 DATA:
-\${matchDataStr}
+${matchDataStr}
 
 INSTRUCTIONS:
 Return a JSON array of analysis objects. DO NOT return markdown blocks around the JSON, just the raw JSON array.
@@ -3388,7 +3388,7 @@ Each object in the array must have the following keys:
 - "analysis": string (A punchy 2-3 sentence expert explanation synthesizing the pattern against the specific opponent. Be extremely confident and professional.)
 - "confidence": number (A score out of 100 based on the probability)
 - "color": string (A hex color code representing the outcome type: e.g. Win=#00FF88, Goals=#00E5FF)
-\`;
+`;
 
         const result = await callPredictionAI(prompt, activeProvider, {
             temperature: 0.4,
