@@ -375,22 +375,14 @@ function UpcomingAiAnalysis() {
     }
   };
 
-  // Initial fetch
-  useEffect(() => {
-    fetchAnalysis();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Initial fetch on mount
+  useEffect(() => { fetchAnalysis(); }, []);
 
-  // Polling if no results found
+  // Auto-poll every 15s when no results found
   useEffect(() => {
-    let interval;
-    if (data && (!data.analyses || data.analyses.length === 0)) {
-      interval = setInterval(() => {
-        fetchAnalysis(true);
-      }, 15000);
-    }
+    if (!data || (data.analyses && data.analyses.length > 0)) return;
+    const interval = setInterval(() => fetchAnalysis(true), 15000);
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
   return (
