@@ -177,6 +177,8 @@ function PatternCard({pattern,isHistory,isLive}){
 
 function PatternList({patterns,loading,error,onReload,isHistory,flatMode}){
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [touchStart, setTouchStart] = useState(null);
+  const [touchEnd, setTouchEnd] = useState(null);
 
   useEffect(() => {
     // eslint-disable-next-line
@@ -203,6 +205,28 @@ function PatternList({patterns,loading,error,onReload,isHistory,flatMode}){
       setCurrentIndex((prev) => (prev < patterns.length - 1 ? prev + 1 : 0));
     } catch (e) {
       console.error('[PatternList] ❌ Error in handleNext:', e);
+    }
+  };
+
+  const onTouchStart = (e) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEndHandler = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > 50;
+    const isRightSwipe = distance < -50;
+
+    if (isLeftSwipe) {
+      handleNext();
+    } else if (isRightSwipe) {
+      handlePrev();
     }
   };
 
@@ -242,6 +266,7 @@ function PatternList({patterns,loading,error,onReload,isHistory,flatMode}){
 
   return (
     <div style={{position: 'relative', padding: '10px 0'}}>
+      <style>{`@media (max-width: 768px) { .carousel-arrow { display: none !important; } }`}</style>
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
         <div style={{fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)', fontWeight: 600}}>
           <span style={{color: NEON}}>Pattern Carousel</span> — Viewing {currentIndex + 1} of {patterns.length}
@@ -256,6 +281,7 @@ function PatternList({patterns,loading,error,onReload,isHistory,flatMode}){
       <div style={{display: 'flex', alignItems: 'center', gap: 16}}>
         {patterns.length > 1 && (
           <button 
+            className="carousel-arrow"
             onClick={handlePrev} 
             onMouseEnter={btnHover} 
             onMouseLeave={btnLeave}
@@ -266,7 +292,12 @@ function PatternList({patterns,loading,error,onReload,isHistory,flatMode}){
           </button>
         )}
         
-        <div style={{flex: 1, minWidth: 0, position: 'relative', animation: 'fadeIn 0.4s ease-out', key: currentIndex}}>
+        <div 
+          style={{flex: 1, minWidth: 0, position: 'relative', animation: 'fadeIn 0.4s ease-out', key: currentIndex, touchAction: 'pan-y'}}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEndHandler}
+        >
           {/* Include context banner if in history mode (which used grouped mode) */}
           {!flatMode && currentPattern.league && (
             <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
@@ -285,6 +316,7 @@ function PatternList({patterns,loading,error,onReload,isHistory,flatMode}){
 
         {patterns.length > 1 && (
           <button 
+            className="carousel-arrow"
             onClick={handleNext} 
             onMouseEnter={btnHover} 
             onMouseLeave={btnLeave}
@@ -328,8 +360,8 @@ function UpcomingAiAnalysis() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchAnalysis = async () => {
-    setLoading(true);
+  const fetchAnalysis = async (isPolling = false) => {
+    if (!isPolling) setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/pattern-intel/upcoming-ai-analysis');
@@ -337,11 +369,29 @@ function UpcomingAiAnalysis() {
       if (!json.success) throw new Error(json.error || 'Failed to generate analysis');
       setData(json);
     } catch (err) {
-      setError(err.message);
+      if (!isPolling) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!isPolling) setLoading(false);
     }
   };
+
+  // Initial fetch
+  useEffect(() => {
+    fetchAnalysis();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Polling if no results found
+  useEffect(() => {
+    let interval;
+    if (data && (!data.analyses || data.analyses.length === 0)) {
+      interval = setInterval(() => {
+        fetchAnalysis(true);
+      }, 15000);
+    }
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   return (
     <div style={{animation: 'fadeIn 0.5s ease'}}>
@@ -352,8 +402,8 @@ function UpcomingAiAnalysis() {
             Cross-references the most elite historical patterns (&gt;80% accuracy) with the <strong>immediate upcoming betslip fixtures</strong>. Generates a consolidated expert analysis for the games starting in the next 5 minutes.
           </div>
         </div>
-        <button onClick={fetchAnalysis} disabled={loading} style={{padding:'12px 24px',background:loading?`rgba(255,255,255,0.1)`:`linear-gradient(135deg, ${PURPLE}30, ${NEON}30)`,border:`1px solid ${PURPLE}50`,borderRadius:8,color:'white',fontWeight:800,fontSize:'0.9rem',cursor:loading?'not-allowed':'pointer',boxShadow:`0 0 20px ${PURPLE}20`,transition:'all 0.3s'}}>
-          {loading ? '⏳ Generating AI Analysis...' : '✨ Generate Live Analysis'}
+        <button onClick={() => fetchAnalysis(false)} disabled={loading} style={{padding:'12px 24px',background:loading?`rgba(255,255,255,0.1)`:`linear-gradient(135deg, ${PURPLE}30, ${NEON}30)`,border:`1px solid ${PURPLE}50`,borderRadius:8,color:'white',fontWeight:800,fontSize:'0.9rem',cursor:loading?'not-allowed':'pointer',boxShadow:`0 0 20px ${PURPLE}20`,transition:'all 0.3s'}}>
+          {loading ? '⏳ Generating AI Analysis...' : '✨ Force Refresh'}
         </button>
       </div>
 
@@ -373,11 +423,12 @@ function UpcomingAiAnalysis() {
         <div style={{textAlign:'center',padding:'50px 0',background:'rgba(255,255,255,0.02)',borderRadius:16,border:'1px solid rgba(255,255,255,0.05)'}}>
           <div style={{fontSize:'3rem',marginBottom:16}}>🕰️</div>
           <div style={{fontSize:'1.1rem',color:'white',fontWeight:700,marginBottom:8}}>{data.message}</div>
-          <div style={{color:'rgba(255,255,255,0.4)',fontSize:'0.9rem'}}>No elite patterns matched the current 5-minute window. Try again after the next round starts.</div>
+          <div style={{color:'rgba(255,255,255,0.4)',fontSize:'0.8rem',marginTop:12}}>Auto-refreshing in the background...</div>
         </div>
       )}
 
       {!loading && data && data.analyses && data.analyses.length > 0 && (
+
         <div style={{display:'grid',gap:20,gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))'}}>
           {data.analyses.map((item, idx) => (
             <div key={idx} style={{background:'rgba(10,15,30,0.8)',border:`1px solid ${item.color||PURPLE}40`,borderRadius:16,overflow:'hidden',boxShadow:`0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)`}}>
