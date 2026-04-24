@@ -3322,11 +3322,12 @@ app.get('/api/pattern-intel/upcoming-ai-analysis', async (req, res) => {
             for (const pattern of topPatterns) {
                 // Find if this team is playing right now
                 for (const group of globalData) {
-                    if (group.league !== pattern.league && group.league !== pattern.league.replace(' - Virtual', '')) continue;
+                    const pCountry = pattern.league.split(' ')[0];
+                    if (group.league !== pattern.league && group.league !== 'vFootball Live Odds' && (!group.league || !group.league.includes(pCountry))) continue;
                     
-                    const fixture = group.matches.find(m => m.home === pattern.team || m.away === pattern.team);
+                    const fixture = group.matches.find(m => m.home?.includes(pattern.team) || m.away?.includes(pattern.team) || pattern.team.includes(m.home) || pattern.team.includes(m.away));
                     if (fixture) {
-                        const isHome = fixture.home === pattern.team;
+                        const isHome = fixture.home?.includes(pattern.team) || pattern.team.includes(fixture.home);
                         upcomingMatches.push({
                             pattern,
                             fixture: {
