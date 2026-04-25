@@ -1,6 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { TelegramUser, SystemSettings } = require('./db_init');
 const { callPredictionAI, parseAIJson, generateSmartPrompt, calculateImpliedProbability } = require('./prediction_ai');
+const { computeTeamForm, computeH2HForm } = require('./db_reader');
 require('dotenv').config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -173,10 +174,21 @@ if (bot) {
                         if (matches && matches.length > 0) {
                             const match = matches[0];
                             
+                            // Fetch historical context concurrently from MongoDB
+                            const [homeFormData, awayFormData, h2hFormData] = await Promise.all([
+                                computeTeamForm(targetLeague, match.home, 10),
+                                computeTeamForm(targetLeague, match.away, 10),
+                                computeH2HForm(targetLeague, match.home, match.away, 10)
+                            ]);
+                            
+                            const homeFormStr = homeFormData.form || 'Unknown';
+                            const awayFormStr = awayFormData.form || 'Unknown';
+                            const h2hFormStr  = h2hFormData.form || 'Unknown';
+
                             if (action === 'predict_ai') {
-                                bot.sendMessage(chatId, `🧠 Connecting to AI Core...\nAnalyzing ${match.home} vs ${match.away} in ${targetLeague}...`);
+                                bot.sendMessage(chatId, `🧠 Connecting to AI Core...\nAnalyzing ${match.home} vs ${match.away} in ${targetLeague}...\n📚 Cross-referencing against database histories...`);
                                 try {
-                                    const prompt = generateSmartPrompt(targetLeague, match.home, match.away, match.score);
+                                    const prompt = generateSmartPrompt(targetLeague, match.home, match.away, match.score, homeFormStr, awayFormStr, h2hFormStr);
                                     
                                     const aiResult = await callPredictionAI(prompt);
                                     const parsedDetails = parseAIJson(aiResult.content);
@@ -185,6 +197,10 @@ if (bot) {
                                               `League: ${targetLeague}\n` +
                                               `Match: ${match.home} vs ${match.away}\n` +
                                               `Live Odds: \`${match.score}\`\n\n` +
+                                              `🔥 **Historical Form:**\n` +
+                                              `🏠 Home: ${homeFormStr}\n` +
+                                              `🏃 Away: ${awayFormStr}\n` +
+                                              `⚔️ H2H: ${h2hFormStr}\n\n` +
                                               `💡 **Tip:** ${parsedDetails.tip}\n` +
                                               `📈 **Confidence:** ${parsedDetails.confidence}`;
                                 } catch (aiError) {
@@ -197,12 +213,33 @@ if (bot) {
                                 let conf = "75%";
                                 
                                 if (probs.valid) {
-                                    if (probs.home > 50) { fastTip = "Home Win (1) or 1X"; conf = `${probs.home + 15}%`; }
-                                    else if (probs.away > 50) { fastTip = "Away Win (2) or X2"; conf = `${probs.away + 15}%`; }
-                                    else { fastTip = "Under 3.5 Goals or Double Chance"; conf = "80%"; }
+                                    // Math + Historical form synergy overrides
+                                    const homeWantsToWin = probs.home > 50;
+                                    const awayWantsToWin = probs.away > 50;
+                                    
+                                    const homeHasGoodForm = homeFormStr.includes('W') && !homeFormStr.endsWith('LL');
+                                    const awayHasGoodForm = awayFormStr.includes('W') && !awayFormStr.endsWith('LL');
+
+                                    if (homeWantsToWin && homeHasGoodForm) { 
+                                        fastTip = "Home Win (1) or 1X"; 
+                                        conf = `${probs.home + 15}%`; 
+                                    }
+                                    else if (awayWantsToWin && awayHasGoodForm) { 
+                                        fastTip = "Away Win (2) or X2"; 
+                                        conf = `${probs.away + 15}%`; 
+                                    }
+                                    else if ((homeWantsToWin && !homeHasGoodForm) || (awayWantsToWin && !awayHasGoodForm)) {
+                                        // Trap identified (High probability but poor form)
+                                        fastTip = "Over 1.5 Goals & GG (Trap avoided)";
+                                        conf = `88%`;
+                                    }
+                                    else { 
+                                        fastTip = "Under 3.5 Goals or Double Chance"; 
+                                        conf = "80%"; 
+                                    }
                                 }
 
-                                tipText = `🔍 **${typeName} Prediction Generated**\n\n` +
+                                tipText = `⚡ **${typeName} Fast Prediction**\n\n` +
                                           `League: ${targetLeague}\n` +
                                           `Match: ${match.home} vs ${match.away}\n` +
                                           `Live Odds: \`${match.score}\`\n\n` +

@@ -244,7 +244,7 @@ function parseAIJson(content) {
 // ── Implied Probability Math Engine ──────────────────────────────────────────────
 function calculateImpliedProbability(oddsString) {
     // Expected format: "1(1.50) X(3.20) 2(5.00)" or similar
-    const result = { home: 0, draw: 0, away: 0, valid: false };
+    const result = { home: 0, draw: 0, away: 0, overround: 0, xG_home: 0, xG_away: 0, valid: false };
     if (!oddsString) return result;
 
     try {
@@ -268,6 +268,14 @@ function calculateImpliedProbability(oddsString) {
                 result.home = Math.round((prob1 / totalMargin) * 100);
                 result.draw = Math.round((probX / totalMargin) * 100);
                 result.away = Math.round((prob2 / totalMargin) * 100);
+                
+                // Advanced Math Metrics
+                result.overround = Math.round(totalMargin - 100);
+                
+                // Poisson Expected Goals (xG) Approximation based on normalized virtual distribution (~2.8 goals per match avg)
+                result.xG_home = ((result.home / 100) * 2.8).toFixed(2);
+                result.xG_away = ((result.away / 100) * 2.8).toFixed(2);
+
                 result.valid = true;
             }
         }
@@ -277,23 +285,33 @@ function calculateImpliedProbability(oddsString) {
     return result;
 }
 
-function generateSmartPrompt(league, home, away, oddsStr) {
+function generateSmartPrompt(league, home, away, oddsStr, homeForm, awayForm, h2hForm) {
     const probs = calculateImpliedProbability(oddsStr);
     let insights = '';
 
     if (probs.valid) {
-        insights = `Mathematical Implied Probabilities based on Bookmaker Odds:
-- Home Win: ${probs.home}%
-- Draw: ${probs.draw}%
-- Away Win: ${probs.away}%
+        insights = `Mathematical Probability & Analytics:
+- True Home Win: ${probs.home}%  | Expected Goals (xG): ${probs.xG_home}
+- True Draw: ${probs.draw}%
+- True Away Win: ${probs.away}%  | Expected Goals (xG): ${probs.xG_away}
+- Bookmaker Margin (Overround): ${probs.overround}%
 
-Identify the highest value bet. If one team has >55% probability, consider a direct win or Over 1.5. 
-If probabilities are tight, consider Double Chance or Under 2.5/3.5 goals.`;
+Historical Form (Last 10 Matches):
+- ${home} Form: ${homeForm || 'Unknown'}
+- ${away} Form: ${awayForm || 'Unknown'}
+- Recent Head-to-Head (H2H): ${h2hForm || 'Unknown'}
+
+Identify the highest value edge. Cross-reference the Bookmaker's Expected Goals (xG) against the actual historical Form streaks.
+Look for False Favorites (e.g. mathematical >50% probability but poor recent team form) and pivot to Goals markets.
+If the Bookmaker Overround is high (>12%), be wary of traps.`;
     } else {
-        insights = `No valid odds provided. Rely on general team strength for this context.`;
+        insights = `Historical Form (Last 10 Matches):
+- ${home} Form: ${homeForm || 'Unknown'}
+- ${away} Form: ${awayForm || 'Unknown'}
+- Recent Head-to-Head (H2H): ${h2hForm || 'Unknown'}`;
     }
 
-    return `Act as an elite virtual football quantitative analyst.
+    return `Act as an elite virtual football quantitative trader. 
 Analyze the following live match:
 League: ${league}
 Match: ${home} vs ${away}
@@ -301,7 +319,7 @@ Live Odds String: ${oddsStr}
 
 ${insights}
 
-Calculate the best outcome based strictly on mathematical edge.
+Calculate the absolute safest bet based *strictly* on mathematical edge and streak reality.
 Return ONLY a JSON object exactly like this:
 {"tip": "String (e.g. Over 2.5 Goals, 1X, Home Win)", "confidence": "String (e.g. 85%)"}
 Do not wrap in markdown \`\`\`json. Just the raw JSON object.`;
