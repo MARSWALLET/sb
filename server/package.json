@@ -23,6 +23,7 @@
     "jimp": "^0.22.10",
     "mongodb": "^7.2.0",
     "mongoose": "^9.4.1",
+    "node-telegram-bot-api": "^0.67.0",
     "openai": "^6.34.0",
     "puppeteer-core": "^24.40.0",
     "puppeteer-extra": "^3.3.6",

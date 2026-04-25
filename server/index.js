@@ -82,6 +82,16 @@ app.use("/", require("./routes/db")(globalsPass));
 app.use("/", require("./routes/scrapers")(globalsPass));
 app.use("/", require("./routes/ai")(globalsPass));
 app.use("/", require("./routes/intelligence")(globalsPass));
+app.use("/", require("./routes/admin_billing")(globalsPass));
+app.use("/", require("./routes/payments")(globalsPass));
+
+// ── TELEGRAM BOT INITIALIZATION ──
+try {
+    const { startBot } = require('./telegram_bot');
+    startBot(globalsPass);
+} catch (e) {
+    console.warn('[Server] Error initializing Telegram Bot:', e.message);
+}
 
 
 // ─────────────────────────────────────────────────────────────────────────────

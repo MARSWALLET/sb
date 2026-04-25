@@ -137,6 +137,43 @@ const patternSnapshotSchema = new mongoose.Schema({
 
 const PatternSnapshot = mongoose.models.PatternSnapshot || mongoose.model('PatternSnapshot', patternSnapshotSchema, 'pattern_snapshots');
 
+// ── Telegram Monetization Schemas ──────────────────────────────────────────────
+const telegramUserSchema = new mongoose.Schema({
+    _id: String, // telegram chat ID
+    username: String,
+    pointsBalance: { type: Number, default: 0 },
+    subscriptionTier: { type: String, enum: ['none', 'pro', 'vip'], default: 'none' },
+    subscriptionExpiry: { type: Date, default: null },
+    totalPredictionsRequested: { type: Number, default: 0 },
+    joinedAt: { type: Date, default: Date.now }
+}, { strict: false });
+
+const transactionSchema = new mongoose.Schema({
+    _id: String, // system generated transaction id
+    telegramId: String,
+    amount: Number,
+    currency: { type: String, default: 'STARS' }, // 'STARS', 'NGN', 'USD'
+    method: { type: String, enum: ['telegram_stars', 'squad_api', 'manual'], default: 'telegram_stars' },
+    status: { type: String, enum: ['pending', 'completed', 'failed', 'refunded'], default: 'pending' },
+    reference: String, // Payment Gateway reference
+    type: { type: String, enum: ['points', 'subscription'], default: 'points' },
+    itemBought: String, // e.g., "100 Points Pack", "1 Month PRO"
+    timestamp: { type: Date, default: Date.now }
+}, { strict: false });
+
+const systemSettingsSchema = new mongoose.Schema({
+    _id: String, // usually just 'global_config'
+    normalPredictionCost: { type: Number, default: 1 },
+    aiPredictionCost: { type: Number, default: 5 },
+    pointsRates: { type: Object, default: { '100': 100, '500': 450, '1000': 800 } }, // Star/Currency cost per point pack
+    subscriptionRates: { type: Object, default: { 'pro_monthly': 2500, 'vip_monthly': 5000 } },
+    updatedAt: { type: Date, default: Date.now }
+}, { strict: false });
+
+const TelegramUser = mongoose.models.TelegramUser || mongoose.model('TelegramUser', telegramUserSchema, 'telegram_users');
+const Transaction = mongoose.models.Transaction || mongoose.model('Transaction', transactionSchema, 'transactions');
+const SystemSettings = mongoose.models.SystemSettings || mongoose.model('SystemSettings', systemSettingsSchema, 'system_settings');
+
 module.exports = {
     connectDb,
     mongoose,
@@ -149,5 +186,8 @@ module.exports = {
     SystemStrategy,
     StrategyHistory,
     LeagueBaseline,
-    PatternSnapshot
+    PatternSnapshot,
+    TelegramUser,
+    Transaction,
+    SystemSettings
 };
