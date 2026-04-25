@@ -426,8 +426,27 @@ function UpcomingAiAnalysis() {
             <div key={idx} style={{background:'rgba(10,15,30,0.8)',border:`1px solid ${item.color||PURPLE}40`,borderRadius:16,overflow:'hidden',boxShadow:`0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)`}}>
               <div style={{padding:'16px 20px',background:`linear-gradient(90deg, ${item.color||PURPLE}15, transparent)`,borderBottom:`1px solid rgba(255,255,255,0.05)`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <div>
-                  <div style={{fontSize:'0.7rem',color:item.color||PURPLE,fontWeight:800,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:4}}>
-                    {item.team} MATCH {item.time && <span style={{marginLeft:8, color:'white', background:'rgba(255,255,255,0.15)', padding:'2px 6px', borderRadius:4, textTransform:'none'}}>🕒 {item.time}</span>}
+                  <div style={{fontSize:'0.7rem',color:item.color||PURPLE,fontWeight:800,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:4,display:'flex',alignItems:'center'}}>
+                    {item.team} MATCH 
+                    {item.time && (
+                      <span style={{
+                        marginLeft:8, 
+                        color: item.time.includes('LIVE') ? RED : 'white', 
+                        background: item.time.includes('LIVE') ? `${RED}20` : 'rgba(255,255,255,0.15)', 
+                        border: item.time.includes('LIVE') ? `1px solid ${RED}50` : '1px solid transparent',
+                        padding:'2px 8px', 
+                        borderRadius:6, 
+                        textTransform:'none',
+                        display:'inline-flex',
+                        alignItems:'center',
+                        gap: 5
+                      }}>
+                        {item.time.includes('LIVE') ? (
+                          <span style={{width: 6, height: 6, borderRadius: '50%', background: RED, boxShadow: `0 0 8px ${RED}`, animation: 'pulse 1.5s infinite'}} />
+                        ) : '🕒 '}
+                        {item.time.replace(/\s?\(LIVE\)/i, '')} {item.time.includes('LIVE') && 'LIVE'}
+                      </span>
+                    )}
                   </div>
                   <div style={{fontSize:'1.1rem',fontWeight:900,color:'white'}}>{item.match}</div>
                 </div>

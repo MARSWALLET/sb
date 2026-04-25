@@ -538,6 +538,68 @@ async function reloadContinuousScraper() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SCRAPE LIVE LIST ON DEMAND
+// Scrapes the mobile live list to find matches currently playing, which are the 
+// immediate next fixtures that pattern intelligence should predict.
+// ─────────────────────────────────────────────────────────────────────────────
+async function scrapeLiveListOnDemand() {
+    if (!_scraperCtrl.browser) {
+        console.warn('[Live Scraper OnDemand] No browser instance available.');
+        return [];
+    }
+    
+    let page;
+    try {
+        console.log('[Live Scraper OnDemand] Opening new page for live_list...');
+        page = await _scraperCtrl.browser.newPage();
+        await page.goto('https://www.sportybet.com/ng/m/sport/vFootball/live_list', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        
+        const content = await page.evaluate(() => document.body.innerText);
+        const lines = content.split('\n');
+        const grouped = {};
+        
+        let currentLeague = 'vFootball Live';
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i]?.trim() ?? '';
+            
+            // Try to detect league headers
+            if (line.includes('England - Virtual')) currentLeague = 'England - Virtual';
+            if (line.includes('Spain - Virtual')) currentLeague = 'Spain - Virtual';
+            if (line.includes('Italy - Virtual')) currentLeague = 'Italy - Virtual';
+            if (line.includes('Germany - Virtual')) currentLeague = 'Germany - Virtual';
+            if (line.includes('France - Virtual')) currentLeague = 'France - Virtual';
+
+            if (line.startsWith('ID ')) {
+                const code = line.replace('ID ', '').trim();
+                const time = lines[i - 1]?.trim() || '--:--';
+                const league = lines[i + 1]?.trim() || currentLeague;
+                const home = lines[i + 2]?.trim() || 'TBD';
+                const away = lines[i + 3]?.trim() || 'TBD';
+                const odd1 = lines[i + 4]?.trim() || '-';
+                const oddX = lines[i + 5]?.trim() || '-';
+                const odd2 = lines[i + 6]?.trim() || '-';
+                
+                if (!grouped[league]) grouped[league] = [];
+                grouped[league].push({ time, code, home, away, score: `1(${odd1}) X(${oddX}) 2(${odd2})` });
+            }
+        }
+        
+        const results = Object.keys(grouped).map(league => ({ league, matches: grouped[league] }));
+        console.log(`[Live Scraper OnDemand] Successfully scraped ${results.reduce((acc, curr) => acc + curr.matches.length, 0)} live matches across ${results.length} leagues.`);
+        return results;
+        
+    } catch (err) {
+        console.error('[Live Scraper OnDemand] Error scraping live_list:', err.message);
+        return [];
+    } finally {
+        if (page) {
+            try { await page.close(); } catch (_) {}
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
 module.exports = {
@@ -547,6 +609,7 @@ module.exports = {
     getHistoricalResults,
     getLivePage,
     getLivePageUrl,
+    scrapeLiveListOnDemand,
     // Expose store info for debug endpoint
     getHistoryStoreInfo: () => ({
         totalEntries: historyStore.length,

@@ -11,7 +11,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Jimp = require('jimp');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { startContinuousScraper, stopContinuousScraper, reloadContinuousScraper, getHistoricalResults, getHistoryStoreInfo } = require('./scraper');
+const { startContinuousScraper, stopContinuousScraper, reloadContinuousScraper, getHistoricalResults, getHistoryStoreInfo, scrapeLiveListOnDemand } = require('./scraper');
 const { captureLeagueResults } = require('./screenshot_scraper');
 const { nativeCaptureLeagueResults } = require('./native_scraper');
 const { uploadMatchesToDatabase, syncMatchesToDatabase, getDatabaseHistoryLog, setDatabaseHistoryLog, dbEvents } = require('./db_uploader');
@@ -3313,25 +3313,41 @@ app.get('/api/pattern-intel/upcoming-ai-analysis', async (req, res) => {
             return maxB - maxA;
         });
         
-        // 3. Cross-reference with globalData to find ACTUAL upcoming opponents
-        // globalData: [{ league, matches: [{ time, code, home, away, score }] }]
+        // 3. Cross-reference with live list to find ACTUAL currently playing opponents
+        // live matches are the true immediate "next" matches for teams that just triggered a pattern.
+        let currentLiveGames = await scrapeLiveListOnDemand();
+        let isFromLiveList = true;
+        
+        // If live games are empty or unavailable, fallback to upcoming globalData
+        if (!currentLiveGames || currentLiveGames.length === 0) {
+            console.log('[Upcoming AI] Live list is empty, falling back to upcoming betslip data...');
+            currentLiveGames = globalData;
+            isFromLiveList = false;
+        } else {
+            console.log(`[Upcoming AI] Found live games on live_list! Prioritising these as the true next match.`);
+        }
+
         const upcomingMatches = [];
         const topPatterns = patterns.slice(0, 15); // Don't check too many
         
-        if (globalData && Array.isArray(globalData)) {
+        if (currentLiveGames && Array.isArray(currentLiveGames)) {
             for (const pattern of topPatterns) {
                 // Find if this team is playing right now
-                for (const group of globalData) {
+                for (const group of currentLiveGames) {
                     const pCountry = pattern.league.split(' ')[0];
-                    if (group.league !== pattern.league && group.league !== 'vFootball Live Odds' && (!group.league || !group.league.includes(pCountry))) continue;
+                    if (group.league !== pattern.league && group.league !== 'vFootball Live Odds' && group.league !== 'vFootball Live' && (!group.league || !group.league.includes(pCountry))) continue;
                     
                     const fixture = group.matches.find(m => m.home?.includes(pattern.team) || m.away?.includes(pattern.team) || pattern.team.includes(m.home) || pattern.team.includes(m.away));
                     if (fixture) {
                         const isHome = fixture.home?.includes(pattern.team) || pattern.team.includes(fixture.home);
+                        const displayTime = isFromLiveList 
+                            ? (fixture.time ? `${fixture.time} (LIVE)` : 'LIVE') 
+                            : (fixture.time || 'Upcoming');
+                            
                         upcomingMatches.push({
                             pattern,
                             fixture: {
-                                time: fixture.time,
+                                time: displayTime,
                                 code: fixture.code,
                                 home: fixture.home,
                                 away: fixture.away,
