@@ -67,6 +67,24 @@ app.use(cors());
 app.use(express.json());
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MOUNTED ROUTES
+// ─────────────────────────────────────────────────────────────────────────────
+const globalsPass = {
+    get globalData() { return globalData; },
+    set globalData(val) { globalData = val; },
+    getLivePage: () => typeof getLivePage !== "undefined" ? getLivePage() : null,
+    broadcastAiStatus,
+    broadcastLiveScores
+};
+
+app.use("/", require("./routes/system")(globalsPass));
+app.use("/", require("./routes/db")(globalsPass));
+app.use("/", require("./routes/scrapers")(globalsPass));
+app.use("/", require("./routes/ai")(globalsPass));
+app.use("/", require("./routes/intelligence")(globalsPass));
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Static file serving — serves the built React frontend in production.
 // When deployed on Railway, "npm run build" copies client/dist → server/public
 // The Express server then serves both the API and the React app on one port.
@@ -83,36 +101,9 @@ if (fs.existsSync(PUBLIC_DIR)) {
 // GET /api/health  — Server health check for Admin panel monitoring
 // Returns: uptime, memory, scraper status, Node version, environment
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-    const memMB = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
-    const uptimeSec = Math.floor(process.uptime());
-    const hours = Math.floor(uptimeSec / 3600);
-    const mins  = Math.floor((uptimeSec % 3600) / 60);
-    const secs  = uptimeSec % 60;
-    const uptimeStr = `${hours}h ${mins}m ${secs}s`;
 
-    const scraperActive = globalData !== null && Array.isArray(globalData) && globalData.length > 0;
-    const matchCount = scraperActive
-        ? globalData.reduce((acc, g) => acc + (g.matches?.length || 0), 0)
-        : 0;
+/* Extracted get /api/health */
 
-    console.log(`[DEBUG] [/api/health] uptime=${uptimeStr} mem=${memMB}MB scraper=${scraperActive}`);
-    res.json({
-        success: true,
-        status:  'ok',
-        uptime:  uptimeStr,
-        uptimeSec,
-        memoryMB: parseFloat(memMB),
-        nodeVersion: process.version,
-        env:     process.env.NODE_ENV || 'development',
-        scraper: {
-            active:     scraperActive,
-            liveLeagues: globalData ? globalData.map(g => g.league) : [],
-            liveMatches: matchCount,
-        },
-        timestamp: new Date().toISOString(),
-    });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/scraper-diag  — Live DOM diagnostic for the running scraper page
@@ -124,88 +115,16 @@ app.get('/api/health', (req, res) => {
 // Usage: GET /api/scraper-diag
 // Returns: { selectorResults, classNames, bodyPreview, url, pageTitle }
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/scraper-diag', async (req, res) => {
-    const livePage = getLivePage();
-    if (!livePage) {
-        console.warn('[DEBUG] [/api/scraper-diag] No live page available — scraper not running yet.');
-        return res.status(503).json({
-            success: false,
-            error: 'Live scraper page not available. The scraper may still be initialising — wait ~10 seconds and retry.',
-        });
-    }
 
-    try {
-        console.log('[DEBUG] [/api/scraper-diag] Running DOM diagnostic on live scraper page...');
+/* Extracted get /api/scraper-diag */
 
-        // Candidate selectors to test (same list as debug_live_page.js + new ones from scraper)
-        const CANDIDATES = [
-            '[data-event-id]', '[data-game-id]', '[data-market]',
-            '.m-list', '.m-list > li', '.m-list .m-list-item',
-            '[class*="match"]', '[class*="event-item"]', '[class*="sport-event"]',
-            '[class*="game"]', '[class*="odds"]', '[class*="virtual"]',
-            '.betslip-item', '.match-item', '.event-item',
-        ];
-
-        const diagResult = await livePage.evaluate((candidates) => {
-            // Selector match counts
-            const selectorResults = {};
-            for (const sel of candidates) {
-                const count = document.querySelectorAll(sel).length;
-                if (count > 0) {
-                    selectorResults[sel] = {
-                        count,
-                        firstText: document.querySelector(sel)?.innerText?.substring(0, 150)?.replace(/\n/g, ' | ') || '',
-                    };
-                } else {
-                    selectorResults[sel] = { count: 0, firstText: '' };
-                }
-            }
-
-            // Top unique class names
-            const classNames = new Set();
-            document.querySelectorAll('[class]').forEach(el => {
-                el.className.split(' ').forEach(c => { if (c.trim()) classNames.add(c.trim()); });
-            });
-
-            // Body text preview
-            const bodyPreview = document.body?.innerText?.substring(0, 600) || '';
-
-            return {
-                selectorResults,
-                classNames: [...classNames].slice(0, 100),
-                bodyPreview,
-                pageTitle: document.title,
-                url: location.href,
-            };
-        }, CANDIDATES);
-
-        console.log(`[DEBUG] [/api/scraper-diag] Done. ${Object.values(diagResult.selectorResults).filter(r => r.count > 0).length} selectors matched.`);
-        res.json({ success: true, ...diagResult, timestamp: new Date().toISOString() });
-
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [/api/scraper-diag] Error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /   — Human Friendly Index / API Directory
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/ai-status-stream', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
 
-    const listener = (data) => {
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
-    aiStatusEmitter.on('status', listener);
+/* Extracted get /api/ai-status-stream */
 
-    req.on('close', () => {
-        aiStatusEmitter.removeListener('status', listener);
-    });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/live-stream  — SSE push endpoint for live vFootball odds
@@ -215,281 +134,13 @@ app.get('/api/ai-status-stream', (req, res) => {
 //
 // Falls back cleanly if SSE is not supported (the old /api/scores is kept).
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/live-stream', (req, res) => {
-    console.log('[DEBUG] [/api/live-stream] New SSE client connected.');
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // Disable Nginx buffering in production
-    res.flushHeaders();
 
-    // Send a heartbeat comment every 30s to keep the connection alive through proxies
-    const heartbeat = setInterval(() => {
-        res.write(': heartbeat\n\n');
-    }, 30000);
+/* Extracted get /api/live-stream */
 
-    // Send the current cached data immediately so client doesn't wait for next poll
-    if (globalData !== null) {
-        const initial = { data: globalData, status: 'live', timestamp: Date.now() };
-        res.write(`data: ${JSON.stringify(initial)}\n\n`);
-        console.log('[DEBUG] [/api/live-stream] Sent initial cached data to new client.');
-    } else {
-        const initializing = { data: [], status: 'initializing', timestamp: Date.now() };
-        res.write(`data: ${JSON.stringify(initializing)}\n\n`);
-    }
 
-    // Subscribe to future broadcasts from the scraper
-    const listener = (payload) => {
-        try {
-            res.write(`data: ${JSON.stringify(payload)}\n\n`);
-        } catch (writeErr) {
-            console.warn('[DEBUG] [/api/live-stream] Write failed (client disconnected):', writeErr.message);
-        }
-    };
-    liveScoresEmitter.on('update', listener);
 
-    // Clean up on disconnect
-    req.on('close', () => {
-        clearInterval(heartbeat);
-        liveScoresEmitter.removeListener('update', listener);
-        console.log('[DEBUG] [/api/live-stream] SSE client disconnected. Cleaned up listener.');
-    });
-});
+/* Extracted get / */
 
-app.get('/', (req, res) => {
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Live Sports Dashboard</title>
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-                <style>
-                    :root {
-                        --primary: #3b82f6;
-                        --primary-hover: #2563eb;
-                        --bg-deep: #0f172a;
-                        --glass-bg: rgba(30, 41, 59, 0.7);
-                        --glass-border: rgba(255, 255, 255, 0.1);
-                        --text-main: #f8fafc;
-                        --text-muted: #94a3b8;
-                    }
-                    body {
-                        font-family: 'Inter', sans-serif;
-                        background: radial-gradient(circle at top right, #1e1b4b, var(--bg-deep) 40%);
-                        color: var(--text-main);
-                        margin: 0;
-                        padding: 40px 20px;
-                        min-height: 100vh;
-                        display: flex;
-                        justify-content: center;
-                    }
-                    .container {
-                        max-width: 900px;
-                        width: 100%;
-                    }
-                    .glass-panel {
-                        background: var(--glass-bg);
-                        backdrop-filter: blur(12px);
-                        -webkit-backdrop-filter: blur(12px);
-                        border: 1px solid var(--glass-border);
-                        border-radius: 20px;
-                        padding: 40px;
-                        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-                        margin-bottom: 30px;
-                    }
-                    h1 {
-                        font-size: 2.5rem;
-                        font-weight: 800;
-                        background: linear-gradient(to right, #60a5fa, #c084fc);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        margin-top: 0;
-                        margin-bottom: 10px;
-                    }
-                    p {
-                        color: var(--text-muted);
-                        line-height: 1.6;
-                    }
-                    .grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                        gap: 15px;
-                        margin-top: 30px;
-                    }
-                    .btn {
-                        background: rgba(255, 255, 255, 0.05);
-                        border: 1px solid rgba(255, 255, 255, 0.1);
-                        color: white;
-                        padding: 16px;
-                        border-radius: 12px;
-                        font-size: 1rem;
-                        font-weight: 600;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        gap: 8px;
-                    }
-                    .btn:hover {
-                        background: var(--primary);
-                        border-color: var(--primary-hover);
-                        transform: translateY(-3px);
-                        box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.5);
-                    }
-                    /* Loading State */
-                    .loader-container {
-                        display: none;
-                        text-align: center;
-                        padding: 40px;
-                    }
-                    .spinner {
-                        width: 40px;
-                        height: 40px;
-                        border: 4px solid rgba(255,255,255,0.1);
-                        border-top-color: var(--primary);
-                        border-radius: 50%;
-                        animation: spin 1s infinite linear;
-                        margin: 0 auto 15px auto;
-                    }
-                    @keyframes spin { 100% { transform: rotate(360deg); } }
-                    
-                    /* Image Result */
-                    #result-container {
-                        display: none;
-                        margin-top: 30px;
-                        text-align: center;
-                    }
-                    #result-img {
-                        max-width: 100%;
-                        border-radius: 12px;
-                        border: 1px solid var(--glass-border);
-                        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-                    }
-                    
-                    /* How it works */
-                    .how-it-works {
-                        background: rgba(0, 0, 0, 0.2);
-                        border-radius: 12px;
-                        padding: 20px;
-                        margin-top: 30px;
-                        border-left: 4px solid var(--primary);
-                    }
-                    .how-it-works h4 { margin-top: 0; color: #fff; }
-                    .how-it-works ul { margin-bottom: 0; padding-left: 20px; color: var(--text-muted); line-height: 1.8;}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="glass-panel">
-                        <h1>vFootball Screenshot Capture</h1>
-                        <p>Select a league below to instantly spin up the background browser, navigate to the specific live category, and capture a full-page encrypted screenshot.</p>
-                        
-                        <div class="grid">
-                            <button class="btn" onclick="captureLeague('England League')">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England</button>
-                            <button class="btn" onclick="captureLeague('Spain League')">🇪🇸 Spain</button>
-                            <button class="btn" onclick="captureLeague('Italy League')">🇮🇹 Italy</button>
-                            <button class="btn" onclick="captureLeague('Germany League')">🇩🇪 Germany</button>
-                            <button class="btn" onclick="captureLeague('France League')">🇫🇷 France</button>
-                        </div>
-
-                        <div id="loader" class="loader-container">
-                            <div class="spinner"></div>
-                            <p id="loader-text">Launching Chrome, navigating to SportyBet, selecting category... (Please wait 5-10s)</p>
-                        </div>
-
-                        <div style="margin-top: 30px; text-align: center;">
-                            <label for="history-date" style="font-weight: 600; color: var(--text-muted);">Optional Historical Date:</label>
-                            <input type="date" id="history-date" style="margin-left: 10px; padding: 10px; border-radius: 8px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.3); color: white; color-scheme: dark;">
-                        </div>
-
-                        <div id="result-container" class="glass-panel" style="margin-top: 30px; padding: 20px;">
-                            <img id="result-img" alt="Scraped Result">
-                        </div>
-
-                        <div id="telemetry-panel" class="glass-panel" style="display: none; margin-top: 20px; padding: 20px; text-align: center; border-color: var(--primary);">
-                            <h3 style="color: var(--primary); margin-top: 0; font-size: 1.2rem;">AI Extraction Telemetry</h3>
-                            <div style="display: flex; justify-content: space-around; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;">
-                                <div style="background: rgba(0,0,0,0.3); padding: 10px 15px; border-radius: 8px;"><strong>Key:</strong> <span id="tel-key" style="color: #fbbf24;">--</span></div>
-                                <div style="background: rgba(0,0,0,0.3); padding: 10px 15px; border-radius: 8px;"><strong>Duration:</strong> <span id="tel-duration" style="color: #4ade80;">--</span></div>
-                            </div>
-                            <div style="display: flex; justify-content: space-around; gap: 10px; flex-wrap: wrap; font-size: 0.85rem; color: #cbd5e1;">
-                                <div style="background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);"><strong>RPM:</strong> <span id="tel-rpm">-- / 5</span></div>
-                                <div style="background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);"><strong>TPM:</strong> <span id="tel-tpm">-- / 250K</span></div>
-                                <div style="background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);"><strong>RPD Today:</strong> <span id="tel-rpd">--</span> <span style="opacity: 0.6;">/ 20</span></div>
-                            </div>
-                        </div>
-
-                        <div id="error-banner" class="glass-panel" style="display: none; margin-top: 30px; padding: 20px; border-color: #ef4444; background: rgba(239, 68, 68, 0.1);">
-                            <h4 style="color: #ef4444; margin-top: 0;">Error Occurred</h4>
-                            <p id="error-text" style="color: #f8fafc; font-size: 0.9rem; margin-bottom: 0;"></p>
-                        </div>
-                        
-                        <div class="how-it-works">
-                            <h4>How this tool works</h4>
-                            <ul>
-                                <li><strong>1-Tap Trigger:</strong> Clicking a button sends a secure request to the Node API.</li>
-                                <li><strong>Headless Emulation:</strong> The server opens a robust stealth browser that bypasses WAF exactly like humans.</li>
-                                <li><strong>UI Navigation:</strong> It specifically searches the DOM, clicks "Football", "vFootball", and precisely opens the "Select Category" dropdown.</li>
-                                <li><strong>Timed Screenshots:</strong> A high-resolution UI snapshot is saved to the server as a unique file, then instantly pushed back to you via base64 for preview.</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <script>
-                    async function captureLeague(league) {
-                        const loader = document.getElementById('loader');
-                        const resultContainer = document.getElementById('result-container');
-                        const resultImg = document.getElementById('result-img');
-                        const loaderText = document.getElementById('loader-text');
-                        const dateInput = document.getElementById('history-date').value;
-
-                        // Update UI
-                        resultContainer.style.display = 'none';
-                        document.getElementById('telemetry-panel').style.display = 'none';
-                        loader.style.display = 'block';
-                        loaderText.innerText = \`Navigating to \${league}... please wait up to 15 seconds.\`
-
-                        try {
-                            const params = new URLSearchParams({ league });
-                            if (dateInput) { params.append('date', dateInput); }
-                            
-                            const response = await fetch(\`/api/vfootball/screenshot-results?\${params.toString()}\`);
-                            const data = await response.json();
-
-                            if (data.success && data.base64Image) {
-                                resultImg.src = data.base64Image;
-                                resultContainer.style.display = 'block';
-                                if (data.tokenStats) {
-                                    document.getElementById('telemetry-panel').style.display = 'block';
-                                    document.getElementById('tel-key').innerText = data.tokenStats.keyIndex + ' of ' + data.tokenStats.totalKeys;
-                                    document.getElementById('tel-duration').innerText = (data.tokenStats.durationMs / 1000).toFixed(2) + 's';
-                                    document.getElementById('tel-rpm').innerText = (data.tokenStats.rpm || 0) + ' / 5';
-                                    document.getElementById('tel-tpm').innerText = (data.tokenStats.tpm || 0).toLocaleString() + ' / 250K';
-                                    
-                                    const rpdScore = data.tokenStats.rpd || 0;
-                                    const rpdEl = document.getElementById('tel-rpd');
-                                    rpdEl.innerText = rpdScore;
-                                    rpdEl.style.color = rpdScore >= 20 ? '#ef4444' : '#cbd5e1';
-                                }
-                            } else {
-                                alert('Error capturing screenshot: ' + (data.error || 'Unknown error'));
-                            }
-                        } catch (err) {
-                            console.error('[Database Index Debug/Error Details]: Network error:', err);
-                            alert('Network critical error occurred while fetching screenshot. Check console.');
-                        } finally {
-                            loader.style.display = 'none';
-                        }
-                    }
-                </script>
-            </body>
-        </html>
-    `);
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 let globalData = null;
@@ -584,34 +235,17 @@ startContinuousScraper((newData) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/scores  — Live vFootball odds (polled every 2s by frontend)
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/scores', (req, res) => {
-    try {
-        if (!globalData) {
-            console.log('[DEBUG] [/api/scores] Data not ready yet — scraper still initialising');
-            return res.json({ success: true, data: [], status: 'initializing' });
-        }
-        console.log(`[DEBUG] [/api/scores] Serving cached data with ${globalData[0]?.matches?.length ?? 0} matches`);
-        res.json({ success: true, cached: true, data: globalData });
-    } catch (error) {
-        console.error('[Database Index Debug/Error Details]: [/api/scores] Unexpected error:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch live scores', details: error.message });
-    }
-});
+
+/* Extracted get /api/scores */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/scraper/reload
 // Forces the background scraper to close its Chrome instance and cleanly restart.
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/scraper/reload', async (req, res) => {
-    try {
-        console.log('[DEBUG] [/api/scraper/reload] Reload requested via API');
-        await reloadContinuousScraper();
-        res.json({ success: true, message: 'Scraper background reload initiated' });
-    } catch (err) {
-        console.error('[/api/scraper/reload] Error:', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted post /api/scraper/reload */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/vfootball/history?page=N
@@ -626,328 +260,51 @@ app.post('/api/scraper/reload', async (req, res) => {
 // If the store is empty (server just started), a warm-up message is returned
 // so the UI stays informative rather than breaking.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/history', async (req, res) => {
-    try {
-        const page = parseInt(req.query.page) || 1;
-        console.log(`[DEBUG] [/api/vfootball/history] Page ${page} requested`);
 
-        const historyData = await getHistoricalResults(page);
+/* Extracted get /api/vfootball/history */
 
-        const storeInfo = getHistoryStoreInfo();
-        console.log(`[DEBUG] [/api/vfootball/history] Store info:`, storeInfo);
-
-        res.json({
-            success: true,
-            page,
-            data: historyData,
-            storeInfo,
-        });
-    } catch (error) {
-        console.error('[Database Index Debug/Error Details]: [/api/vfootball/history] Error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch historical vFootball data',
-            details: error.message,
-        });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/debug/history-store  — Internal debug endpoint
 // Shows how many matches are accumulated in the history ring buffer.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/debug/history-store', (req, res) => {
-    try {
-        const info = getHistoryStoreInfo();
-        console.log('[DEBUG] [/api/debug/history-store] Store stats:', info);
-        res.json({ success: true, ...info });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
+
+/* Extracted get /api/debug/history-store */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/debug/live-list  — Trigger a fresh live_list scrape and return raw data
 // Useful for diagnosing what the scraper actually sees on the live list page.
 // Returns: { leagues[], totalMatches, capturedAt }
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/debug/live-list', async (req, res) => {
-    try {
-        console.log('[DEBUG] [/api/debug/live-list] Triggering on-demand live list scrape...');
-        const liveListGames = await scrapeLiveListOnDemand();
-        const totalMatches = liveListGames.reduce((acc, g) => acc + (g.matches?.length || 0), 0);
 
-        console.log(`[DEBUG] [/api/debug/live-list] Got ${liveListGames.length} league groups, ${totalMatches} matches.`);
-        liveListGames.forEach(g => {
-            console.log(`  [Live List] League: "${g.league}" — ${g.matches?.length || 0} match(es)`);
-            g.matches?.forEach((m, i) => console.log(`    [${i + 1}] ${m.time} | ${m.home} vs ${m.away} | Code: ${m.code} | ${m.score}`));
-        });
+/* Extracted get /api/debug/live-list */
 
-        res.json({
-            success: true,
-            capturedAt: new Date().toISOString(),
-            leagueGroups: liveListGames.length,
-            totalMatches,
-            data: liveListGames,
-        });
-    } catch (err) {
-        console.error('[DEBUG] [/api/debug/live-list] Error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/admin/vfootball/sync-all
 // Orchestrates a high-speed native sync for all primary leagues.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/admin/vfootball/sync-all', async (req, res) => {
-    try {
-        const leagues = SUPPORTED_LEAGUES;
-        let targetDate = req.query.date;
 
-        // Default to Today in YYYY-MM-DD for native context
-        if (!targetDate) {
-            targetDate = new Date().toISOString().split('T')[0];
-        }
-        
-        console.log(`[Admin] 🚀 Starting Global Auto-Sync for ${leagues.join(', ')}...`);
-        broadcastAiStatus('progress', `🚀 Starting Global Auto-Sync (4 Leagues)...`);
+/* Extracted get /api/admin/vfootball/sync-all */
 
-        const results = [];
-        for (const league of leagues) {
-            broadcastAiStatus('progress', `Syncing ${league}...`);
-            
-            const onPageCaptured = async (unused, matchRows, pageNum) => {
-                if (matchRows && matchRows.length > 0) {
-                    const tempFileName = `temp_sync_${league.replace(/\s+/g, '_')}_p${pageNum}.json`;
-                    const tempFilePath = path.join(__dirname, tempFileName);
-                    try {
-                        fs.writeFileSync(tempFilePath, JSON.stringify(matchRows, null, 2));
-                        await uploadMatchesToDatabase(matchRows, (msg) => {
-                            broadcastAiStatus('tool', `[${league} P${pageNum}] ${msg}`);
-                        });
-                        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-                    } catch (e) {
-                        console.error(`[GlobalSync] Error on ${league} P${pageNum}:`, e.message);
-                    }
-                }
-            };
-
-            const result = await nativeCaptureLeagueResults(league, targetDate, { onPageCaptured });
-            results.push({ league, success: result.success });
-        }
-
-        broadcastAiStatus('success', `✅ Global Sync Complete! Processed ${leagues.length} leagues.`);
-        res.json({ success: true, results });
-
-        // ── Priority 6: Auto-train league intelligence in the background ─────────
-        // Fire training for each league that successfully synced — no await, non-blocking
-        const apiKeyForTraining = process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_API_KEY;
-        if (apiKeyForTraining) {
-            const ddmmyyyy = targetDate
-                ? (() => { const [y,m,d] = targetDate.split('-'); return `${d}/${m}/${y}`; })()
-                : todayDDMMYYYY();
-            const leaguesToTrain = results.filter(r => r.success).map(r => r.league);
-            console.log(`[Auto-Train] 🤖 Queuing background training for ${leaguesToTrain.length} leagues on ${ddmmyyyy}...`);
-            setImmediate(async () => {
-                for (const lg of leaguesToTrain) {
-                    try {
-                        console.log(`[Auto-Train] Starting training for ${lg}...`);
-                        // Reuse the internal logic by calling a direct POST to ourselves
-                        const trainRes = await fetch(`http://localhost:${process.env.PORT || 3001}/api/vfootball/learning-mode`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ league: lg, targetDate: ddmmyyyy })
-                        });
-                        const trainData = await trainRes.json();
-                        if (trainData.success) {
-                            console.log(`[Auto-Train] ✅ ${lg} profile built (${trainData.matchesAnalyzed} matches).`);
-                        } else {
-                            console.warn(`[Auto-Train] ⚠️ ${lg} training failed: ${trainData.error}`);
-                        }
-                    } catch (trainErr) {
-                        console.error(`[Auto-Train] ❌ ${lg}: ${trainErr.message}`);
-                    }
-                }
-
-                // 🧬 Auto-compute League DNA baselines after all leagues are trained
-                // This ensures baselines are fresh and ready for the next prediction cycle
-                console.log('[Auto-Train] 🧬 Computing League DNA baselines from last 7 days...');
-                try {
-                    const dnaBaselines = await computeAllLeagueBaselines(7);
-                    console.log(`[Auto-Train] ✅ League DNA baselines computed for ${dnaBaselines.length} leagues.`);
-                    broadcastAiStatus('success', `🧬 League DNA updated for ${dnaBaselines.length} leagues.`);
-                } catch (blErr) {
-                    console.error('[Auto-Train] ⚠️ DNA baseline compute failed (non-fatal):', blErr.message);
-                }
-
-                console.log('[Auto-Train] 🏁 Background training complete for all leagues.');
-            });
-        } else {
-            console.log('[Auto-Train] Skipping — no DEEPSEEK_API_KEY or ANTHROPIC_API_KEY set.');
-        }
-
-    } catch (err) {
-        console.error('[Admin] Global Sync failed:', err);
-        broadcastAiStatus('error', `Global Sync failed: ${err.message}`);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/vfootball/screenshot-results
 // Captures a screenshot of the requested league's results and runs OCR.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/screenshot-results', async (req, res) => {
-    try {
-        const league = req.query.league || 'England League';
-        let targetDate = req.query.date;
-        const forceUpdate = req.query.force === 'true';
-        
-        // Default to Today in YYYY-MM-DD for native context
-        if (!targetDate) {
-            targetDate = new Date().toISOString().split('T')[0];
-        }
 
-        console.log(`[DEBUG] [/api/vfootball/screenshot-results] Request params: ${league}, ${targetDate}, Force: ${forceUpdate}`);
+/* Extracted get /api/vfootball/screenshot-results */
 
-        let isHistorical = false;
-        let targetDateDDMMYYYY = null;
-        if (targetDate) {
-            const todayStr = new Date().toLocaleDateString('en-CA'); 
-            isHistorical = targetDate !== todayStr;
-            const [y, m, d] = targetDate.split('-');
-            if (y && m && d) targetDateDDMMYYYY = `${d}/${m}/${y}`;
-        }
-
-        const logKey = `${league}_${targetDate}`;
-        let record = { status: 'new', uploadedPages: [] };
-        
-        try {
-            const fbRecord = await getDatabaseHistoryLog(logKey);
-            if (fbRecord) record = fbRecord;
-        } catch (e) {
-            console.warn('[DEBUG] Failed to fetch layout history from DB: ', e.message);
-        }
-
-        if (forceUpdate) {
-            console.log(`[DEBUG] Force Update toggled. Wiping clean state for ${logKey}`);
-            record.status = 'new';
-            record.uploadedPages = [];
-        } else if (isHistorical) {
-            // First check History Log. If it says complete, double check Database natively.
-            if (record.status === 'completed' || (!record.status && record.uploadedPages.length === 4)) {
-               console.log(`[DEBUG] Logs flag ${logKey} as completed. Verifying deeply via Database DB...`);
-               if (targetDateDDMMYYYY) {
-                   try {
-                       const dbLeagueName = toDbLeague(league); // uses constants.js — single source of truth
-                       const existingMatches = await fetchFullDayRawResults(dbLeagueName, targetDateDDMMYYYY);
-                       if (existingMatches && existingMatches.length > 30) {
-                           console.log(`[DEBUG] Native DB confirms ${existingMatches.length} matches for ${league} on ${targetDate}. Emitting Landing override.`);
-                           return res.json({ success: true, fullyAvailable: true, landingUrl: '/' });
-                       } else {
-                           console.log(`[DEBUG] Native DB found ${existingMatches?.length || 0} matches. We require a fresh pull to complete!`);
-                           // Continue with extraction loop
-                       }
-                   } catch(err) {
-                       console.warn('[DEBUG] Database deep check failed, falling back...', err.message);
-                   }
-               }
-            }
-        }
-
-        const options = {
-            onPageCaptured: async (unusedScreenshotPath, matchRows, pageNum) => {
-                if (matchRows && matchRows.length > 0) {
-                    const tempFileName = `temp_sync_${league.replace(/\s+/g, '_')}_p${pageNum}.json`;
-                    const tempFilePath = path.join(__dirname, tempFileName);
-
-                    try {
-                        // 1. Save to temporary file as requested
-                        fs.writeFileSync(tempFilePath, JSON.stringify(matchRows, null, 2));
-                        console.log(`\n[Sync-Pipeline] 📁 Saved ${matchRows.length} matches to ${tempFileName}`);
-
-                        // 2. Batch push to database (handles deduplication via bulk upsert)
-                        const { uploaded, skipped } = await uploadMatchesToDatabase(matchRows, (msg) => {
-                            broadcastAiStatus('tool', `[Page ${pageNum}] ${msg}`);
-                        });
-                        console.log(`[Sync-Pipeline] 📤 Page ${pageNum}: ${uploaded} uploaded, ${skipped} skipped.`);
-
-                        // 3. Delete file after finish
-                        if (fs.existsSync(tempFilePath)) {
-                            fs.unlinkSync(tempFilePath);
-                            console.log(`[Sync-Pipeline] 🗑️ Cleanup successful: Deleted ${tempFileName}`);
-                        }
-
-                        // Track progress in history log
-                        record.uploadedPages.push(pageNum);
-                        await setDatabaseHistoryLog(logKey, record);
-
-                    } catch (e) {
-                        console.error(`[Sync-Pipeline] ❌ Failed at Page ${pageNum}:`, e.message);
-                    }
-                }
-            }
-        };
-
-        broadcastAiStatus('progress', `Starting high-speed native sync for ${league}...`);
-        const result = await nativeCaptureLeagueResults(league, targetDate, options);
-
-        if (!result.success) {
-            return res.status(500).json(result);
-        }
-
-        if (isHistorical && !result.skippedAll) {
-            record.status = 'completed';
-            await setDatabaseHistoryLog(logKey, record);
-        }
-
-        res.json({
-            success: true,
-            league: result.league,
-            base64Image: result.base64Image, // May be null if all skipped, frontend handles it.
-            rawText: result.rawText,
-            matchData: result.matchData || [],
-            screenshotPath: result.screenshotPath || null,
-            fullyAvailable: isHistorical,
-            tokenStats: result.tokenStats
-        });
-    } catch (error) {
-        console.error('[Database Index Debug/Error Details]: [/api/vfootball/screenshot-results] Error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/vfootball/history-logs
 // Returns historical batch upload statuses from Database (history_logs collection).
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/history-logs', async (req, res) => {
-    try {
-        console.log('[DEBUG] [/api/vfootball/history-logs] Fetching from Database...');
-        const rawLogs = await fetchAllHistoryLogs();
 
-        // Group by date → league for UI convenience
-        // logKey format: "England League_2026-04-15"
-        const groupedLogs = {};
-        for (const key in rawLogs) {
-            const underscoreIdx = key.indexOf('_');
-            if (underscoreIdx === -1) continue;
-            const league = key.slice(0, underscoreIdx);
-            const date   = key.slice(underscoreIdx + 1);
+/* Extracted get /api/vfootball/history-logs */
 
-            if (!groupedLogs[date]) groupedLogs[date] = {};
-            groupedLogs[date][league] = rawLogs[key];
-        }
-
-        console.log(`[DEBUG] [/api/vfootball/history-logs] Returning ${Object.keys(groupedLogs).length} date groups.`);
-        res.json({ success: true, logs: groupedLogs });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [/api/vfootball/history-logs] Error:', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
@@ -955,36 +312,17 @@ app.get('/api/vfootball/history-logs', async (req, res) => {
 // Public endpoint — reads from Database Firestore using database_reader.
 // Query params: ?page=1&pageSize=5&league=England+-+Virtual&dateFrom=...&dateTo=...
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/public/results', async (req, res) => {
-    try {
-        const { page = 1, pageSize = 5, league, dateFrom, dateTo } = req.query;
-        console.log(`[DEBUG] [/api/public/results] query=`, req.query);
 
-        const data = await fetchResultsFromDatabase({ league, dateFrom, dateTo, page: Number(page), pageSize: Number(pageSize) });
-        res.json({ success: true, ...data });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [/api/public/results]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+/* Extracted get /api/public/results */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/vfootball/available-dates
 // Returns a list of unique available dates in the database for the dropdown.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/available-dates', async (req, res) => {
-    try {
-        const { league } = req.query;
-        const [dates, availableLeagues] = await Promise.all([
-            fetchAvailableDates(league),
-            fetchAvailableLeagues(),
-        ]);
-        res.json({ success: true, dates, availableLeagues });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [/api/vfootball/available-dates]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/vfootball/available-dates */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INTERNAL HELPER: runLearningForLeagueDate
@@ -1582,50 +920,26 @@ Return ONLY valid JSON. No markdown, no wrappers. Be specific — avoid generic 
 // GET /api/ai/strategy-history
 // Fetch the permanent AI Brain Ledger
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/ai/strategy-history', async (req, res) => {
-    try {
-        const history = await fetchStrategyHistory();
-        res.json({ success: true, history });
-    } catch (err) {
-        console.error('[/api/ai/strategy-history]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/ai/strategy-history */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/ai-provider
 // Returns active prediction AI provider + capability status for all providers
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/ai-provider', (req, res) => {
-    try {
-        const status = getPredictionProviderStatus();
-        console.log(`[/api/ai-provider GET] Active: ${status.active} | ${status.providers.filter(p => p.available).length}/${status.providers.length} ready`);
-        res.json({ success: true, ...status });
-    } catch (err) {
-        console.error('[/api/ai-provider GET] Error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/ai-provider */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/ai-provider
 // Body: { provider: 'deepseek' | 'gemini' | 'claude' }
 // Switches global AI provider for all future predictions (persists for session)
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/ai-provider', (req, res) => {
-    try {
-        const { provider } = req.body;
-        if (!provider) return res.status(400).json({ success: false, error: '"provider" field required in body' });
-        setActivePredictionProvider(provider);
-        broadcastAiStatus('info', `🤖 AI Provider switched to: ${provider.toUpperCase()} (${PREDICTION_PROVIDERS[provider]?.label || provider})`);
-        const status = getPredictionProviderStatus();
-        console.log(`[/api/ai-provider POST] ✅ Switched to: ${provider}`);
-        res.json({ success: true, active: provider, ...status });
-    } catch (err) {
-        console.error('[/api/ai-provider POST] Error:', err.message);
-        res.status(400).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted post /api/ai-provider */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/vfootball/predict-live
@@ -1813,49 +1127,18 @@ Return ONLY valid JSON.`;
 // GET /api/vfootball/daily-tips
 // Fetches daily tips from Database for a given date and league.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/daily-tips', async (req, res) => {
-    try {
-        const { date, league } = req.query;
-        if (!date || !league) return res.status(400).json({ success: false, error: 'date and league are required' });
 
-        const tip = await getDailyTip(date, league);
-        if (tip) {
-            return res.json({ success: true, tipData: tip.tipData, cached: true });
-        } else {
-            return res.json({ success: true, tipData: null, cached: false });
-        }
-    } catch (err) {
-        console.error('[/api/vfootball/daily-tips]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+/* Extracted get /api/vfootball/daily-tips */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/vfootball/behaviour-patterns
 // Returns saved behaviour pattern signals from Database for a league.
 // Optionally runs a live streak profile across all teams in the league.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/behaviour-patterns', async (req, res) => {
-    try {
-        const { league, mode } = req.query;
-        console.log(`[/api/vfootball/behaviour-patterns] league=${league || 'ALL'} mode=${mode || 'history'}`);
 
-        if (mode === 'streak-profile') {
-            // Return current win/loss streak profile for all teams in a league
-            if (!league) return res.status(400).json({ success: false, error: 'league is required for streak-profile mode' });
-            console.log(`[BPE API] 📊 Running live streak profile for ${league}...`);
-            const profile = await computeLeagueStreakProfile(league);
-            return res.json({ success: true, streakProfile: profile, league, generatedAt: new Date().toISOString() });
-        }
+/* Extracted get /api/vfootball/behaviour-patterns */
 
-        // Default: return saved behaviour signal history from Firestore
-        const history = await fetchBehaviourSignals(league || null, 20);
-        res.json({ success: true, history, league: league || 'ALL' });
-    } catch (err) {
-        console.error('[/api/vfootball/behaviour-patterns]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/vfootball/behaviour-patterns/analyse
@@ -1863,128 +1146,34 @@ app.get('/api/vfootball/behaviour-patterns', async (req, res) => {
 // Compares with previous screenshot results if matchData arrays are provided.
 // Body: { league, fixtures: [{homeTeam, awayTeam, gameTime}], latestMatches?, previousMatches? }
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/vfootball/behaviour-patterns/analyse', async (req, res) => {
-    try {
-        const { league, fixtures, latestMatches, previousMatches } = req.body;
-        if (!league || !fixtures || !Array.isArray(fixtures)) {
-            return res.status(400).json({ success: false, error: 'league and fixtures[] are required' });
-        }
-        console.log(`[BPE API] 🧠 Ad-hoc behaviour analysis: ${fixtures.length} fixtures in ${league}`);
 
-        // Run pattern detection
-        const signals = await detectBehaviourPatterns(fixtures, league);
+/* Extracted post /api/vfootball/behaviour-patterns/analyse */
 
-        // Optional: compare two screenshot result sets if provided
-        let comparisonReport = null;
-        if (Array.isArray(latestMatches) && Array.isArray(previousMatches) && latestMatches.length > 0) {
-            console.log('[BPE API] 🔍 Running screenshot comparison analysis...');
-            comparisonReport = compareScreenshotResults(latestMatches, previousMatches);
-        }
-
-        // Save signals to Database for dashboard history
-        const today = todayDDMMYYYY();
-        await saveBehaviourSignals(signals, league, today).catch(e =>
-            console.error('[BPE API] Save error (non-fatal):', e.message)
-        );
-
-        res.json({
-            success: true,
-            signals,
-            totalSignals: signals.reduce((sum, s) => sum + (s.signals?.length || 0), 0),
-            promptInjection: buildBehaviourPromptInjection(signals),
-            comparisonReport,
-            league,
-            analyzedAt: new Date().toISOString()
-        });
-    } catch (err) {
-        console.error('[/api/vfootball/behaviour-patterns/analyse]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/vfootball/league-baselines
 // Returns all cached League DNA baselines from MongoDB (used by UI panels)
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/league-baselines', async (req, res) => {
-    try {
-        const { LeagueBaseline } = require('./db_init');
-        const { league } = req.query;
-        console.log(`[/api/vfootball/league-baselines] Fetching baselines — league=${league || 'ALL'}`);
 
-        const query = league ? { _id: league } : {};
-        const baselines = await LeagueBaseline.find(query).lean();
+/* Extracted get /api/vfootball/league-baselines */
 
-        // Sort by match count descending (most data first)
-        baselines.sort((a, b) => (b.matchCount || 0) - (a.matchCount || 0));
-
-        const lastComputed = baselines.length > 0
-            ? baselines.reduce((latest, bl) => {
-                const d = new Date(bl.lastComputed || 0);
-                return d > latest ? d : latest;
-            }, new Date(0))
-            : null;
-
-        console.log(`[/api/vfootball/league-baselines] Returning ${baselines.length} baselines.`);
-        res.json({ success: true, baselines, count: baselines.length, lastComputed });
-    } catch (err) {
-        console.error('[/api/vfootball/league-baselines] Error:', err.message);
-        res.status(500).json({ success: false, error: `Failed to load baselines: ${err.message}` });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/vfootball/league-baselines/compute
 // Triggers a full DNA baseline recompute from the last N days of MongoDB data
 // Body: { daysBack?: number } (default: 7)
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/vfootball/league-baselines/compute', async (req, res) => {
-    try {
-        const { daysBack = 7 } = req.body || {};
-        console.log(`[/api/league-baselines/compute] 🧬 Triggering DNA recompute (last ${daysBack} days)...`);
-        broadcastAiStatus('progress', `🧬 Computing League DNA Baselines from last ${daysBack} days...`);
 
-        const baselines = await computeAllLeagueBaselines(Number(daysBack));
+/* Extracted post /api/vfootball/league-baselines/compute */
 
-        broadcastAiStatus('success', `✅ League DNA computed for ${baselines.length} leagues.`);
-        console.log(`[/api/league-baselines/compute] ✅ Computed ${baselines.length} baselines.`);
-
-        res.json({
-            success: true,
-            computed: baselines.length,
-            leagues: baselines.map(b => b.league),
-            summary: baselines.map(b => ({
-                league: b.league,
-                matchCount: b.matchCount,
-                over1_5: b.stats?.over1_5Percent,
-                over2_5: b.stats?.over2_5Percent,
-                btts: b.stats?.bttsPercent,
-                homeWin: b.stats?.homeWinPercent,
-                draw: b.stats?.drawPercent,
-                topScore: b.topScores?.[0]?.score,
-            }))
-        });
-    } catch (err) {
-        console.error('[/api/league-baselines/compute] Error:', err.message);
-        broadcastAiStatus('error', `DNA compute failed: ${err.message}`);
-        res.status(500).json({ success: false, error: `Baseline compute failed: ${err.message}` });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/vfootball/daily-tips/history
 // Fetches the entire logged history of daily tips (upcoming predictions).
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/daily-tips/history', async (req, res) => {
-    try {
-        const { league } = req.query;
-        const history = await getAllDailyTips(league);
-        res.json({ success: true, history });
-    } catch (err) {
-        console.error('[/api/vfootball/daily-tips/history]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/vfootball/daily-tips/history */
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/vfootball/daily-tips/analyze
 // Uses AI to analyze the matches up to the current date and provides tips.
@@ -2377,112 +1566,51 @@ Return ONLY valid JSON. No markdown. No code blocks. No extra text.`;
 // GET /api/vfootball/league-intelligence/:league
 // Returns the AI's aggregated league intelligence profile
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/league-intelligence/:league', async (req, res) => {
-    try {
-        const { league } = req.params;
-        const decoded = decodeURIComponent(league);
-        const intelDoc = await getLeagueIntelligence(decoded);
 
-        if (intelDoc) {
-            res.json({ success: true, data: intelDoc.merged || intelDoc.profile || intelDoc, rawDoc: intelDoc });
-        } else {
-            res.json({ success: true, data: null });
-        }
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+/* Extracted get /api/vfootball/league-intelligence/:league */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/vfootball/team-form
 // Returns recent W/D/L form for a specific team in a league.
 // Query params: league, team, limit (optional, default 10)
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/vfootball/team-form', async (req, res) => {
-    try {
-        const { league, team, limit } = req.query;
-        console.log(`[DEBUG] [/api/vfootball/team-form] league=${league} team=${team}`);
-        if (!league || !team) {
-            return res.status(400).json({ success: false, error: 'league and team query params are required.' });
-        }
-        const parsedLimit = Math.min(parseInt(limit || '10', 10), 30);
-        const form = await computeTeamForm(league, team, parsedLimit);
-        res.json({ success: true, form });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [/api/vfootball/team-form]', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/vfootball/team-form */
+
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/ai-strategy
 // Returns the currently active AI prediction strategy.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/ai-strategy', async (req, res) => {
-    try {
-        const strategy = await getStrategy();
-        res.json({ success: true, strategy });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/ai-strategy */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/ai-memory
 // Returns the entire AI memory log (used for admin / user display).
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/ai-memory', async (req, res) => {
-    try {
-        const log = await getLog();
-        res.json({ success: true, log });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/ai-memory */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE /api/ai-memory/:id
 // Deletes a specific entry by ID, or pass ?clearAll=true to wipe the whole log.
 // ─────────────────────────────────────────────────────────────────────────────
-app.delete('/api/ai-memory/:id', async (req, res) => {
-    try {
-        if (req.query.clearAll === 'true') {
-            await clearLog();
-            return res.json({ success: true, message: 'Log cleared perfectly' });
-        }
-        await deleteEntry(req.params.id);
-        res.json({ success: true, message: 'Entry removed' });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted delete /api/ai-memory/:id */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/screenshot-preview/:filename
 // Serves a screenshot PNG directly as an image for UI thumbnails and previews.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/screenshot-preview/:filename', (req, res) => {
-    try {
-        const { filename } = req.params;
-        // Security: only allow .png filenames, no path traversal
-        if (!filename.endsWith('.png') || filename.includes('/') || filename.includes('..')) {
-            return res.status(400).json({ error: 'Invalid filename' });
-        }
-        const filePath = path.join(__dirname, 'testdownloadpage', filename);
-        if (!fs.existsSync(filePath)) {
-            console.warn(`[DEBUG] [/api/screenshot-preview] File not found: ${filename}`);
-            return res.status(404).json({ error: 'File not found' });
-        }
-        console.log(`[DEBUG] [/api/screenshot-preview] Serving: ${filename}`);
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=60'); // 1 min cache
-        res.sendFile(filePath);
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [/api/screenshot-preview]', err);
-        res.status(500).json({ error: err.message });
-    }
-});
+
+/* Extracted get /api/screenshot-preview/:filename */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/screenshots
@@ -2490,52 +1618,9 @@ app.get('/api/screenshot-preview/:filename', (req, res) => {
 // Each entry includes: filename, absolutePath, sizeBytes, capturedAt, isNew
 // isNew = true if the file's MD5 hash is NOT in processed_images_hash.json
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/screenshots', (req, res) => {
-    try {
-        const dir = path.join(__dirname, 'testdownloadpage');
-        if (!fs.existsSync(dir)) return res.json({ success: true, screenshots: [] });
 
-        const processedHashes = fs.existsSync(PROCESSED_DB_PATH)
-            ? JSON.parse(fs.readFileSync(PROCESSED_DB_PATH))
-            : [];
+/* Extracted get /api/screenshots */
 
-        const files = fs.readdirSync(dir)
-            .filter(f => f.endsWith('.png'))
-            .map(filename => {
-                const fullPath = path.join(dir, filename);
-                const stat = fs.statSync(fullPath);
-                const hash = getFileHash(fullPath);
-
-                // Read companion metadata file for auto league detection
-                const metaPath = fullPath.replace('.png', '.meta.json');
-                let meta = {};
-                if (fs.existsSync(metaPath)) {
-                    try { meta = JSON.parse(fs.readFileSync(metaPath)); } catch (_) { }
-                }
-
-                return {
-                    filename,
-                    absolutePath: fullPath,
-                    sizeBytes: stat.size,
-                    capturedAt: meta.capturedAt || stat.mtimeMs,
-                    capturedAtISO: meta.capturedAtISO || new Date(stat.mtimeMs).toISOString(),
-                    league: meta.league || null,        // e.g. "England League"
-                    dbLeague: meta.dbLeague || null,    // e.g. "England - Virtual"
-                    date: meta.date || null,
-                    isNew: !processedHashes.includes(hash),
-                    hasMeta: fs.existsSync(metaPath),
-                };
-            })
-            .sort((a, b) => b.capturedAt - a.capturedAt); // newest first
-
-        const newCount = files.filter(f => f.isNew).length;
-        console.log(`[DEBUG] [/api/screenshots] Found ${files.length} screenshots, ${newCount} new`);
-        res.json({ success: true, screenshots: files });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [/api/screenshots]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/extract-and-upload (Server-Sent Events)
@@ -2598,46 +1683,17 @@ function markVisualHashProcessed(hash) {
 // Clears the visual hash database so previously "similar-looking" screenshots
 // can be re-processed. Safe to use — does NOT delete any match data.
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/reset-visual-hashes', (req, res) => {
-    try {
-        const prevCount = fs.existsSync(VISUAL_HASH_DB_PATH)
-            ? JSON.parse(fs.readFileSync(VISUAL_HASH_DB_PATH)).length
-            : 0;
-        fs.writeFileSync(VISUAL_HASH_DB_PATH, JSON.stringify([], null, 2));
-        console.log(`[DEBUG] [reset-visual-hashes] Cleared ${prevCount} visual hash(es) from database.`);
-        res.json({ success: true, cleared: prevCount, message: `Visual hash database cleared. ${prevCount} hash(es) removed.` });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [reset-visual-hashes]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted post /api/reset-visual-hashes */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/db-stream
 // Real-time SSE stream that notifies clients when the database has been updated
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/db-stream', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
 
-    const onUpdate = () => {
-        res.write(`data: ${JSON.stringify({ type: 'db-updated', ts: Date.now() })}\n\n`);
-    };
+/* Extracted get /api/db-stream */
 
-    dbEvents.on('db-updated', onUpdate);
-
-    // Keep connection alive
-    const pingInterval = setInterval(() => {
-        res.write(': ping\n\n');
-    }, 30000);
-
-    req.on('close', () => {
-        clearInterval(pingInterval);
-        dbEvents.off('db-updated', onUpdate);
-    });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/sync-local-to-database
@@ -2646,113 +1702,13 @@ app.get('/api/db-stream', (req, res) => {
 // (e.g. due to past pipeline errors). Streams SSE progress back to the UI.
 // Optional body: { leagueFilter: "Germany - Virtual" } to filter by league.
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/sync-local-to-database', async (req, res) => {
-    const { leagueFilter } = req.body || {};
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
+/* Extracted post /api/sync-local-to-database */
 
-    const send = (msg) => {
-        res.write(`data: ${JSON.stringify({ type: 'progress', message: msg, ts: Date.now() })}\n\n`);
-        console.log(`[Sync-Local-FB] ${msg}`);
-    };
-    const done = (data) => { res.write(`data: ${JSON.stringify({ type: 'done', ...data })}\n\n`); res.end(); };
-    const fail = (msg) => { res.write(`data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`); res.end(); };
 
-    try {
-        if (!fs.existsSync(OUTPUT_DATA_PATH)) return fail('No local database found (extracted_league_data.json missing).');
 
-        let allData = JSON.parse(fs.readFileSync(OUTPUT_DATA_PATH));
-        if (leagueFilter) {
-            allData = allData.filter(m => m.league === leagueFilter);
-            send(`🔍 Filtered to ${allData.length} records for league: ${leagueFilter}`);
-        }
+/* Extracted post /api/extract-and-upload */
 
-        if (allData.length === 0) return fail('Local database is empty. Nothing to sync.');
-
-        send(`📂 Found ${allData.length} records in local DB. Starting Database sync...`);
-        const { uploaded, skipped } = await uploadMatchesToDatabase(allData, send);
-        send(`✅ Sync complete! ${uploaded} documents written, ${skipped} skipped.`);
-        done({ uploaded, skipped, total: allData.length });
-
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [sync-local-to-database]', err);
-        fail(`Server error: ${err.message}`);
-    }
-});
-
-app.post('/api/extract-and-upload', async (req, res) => {
-
-    const { matchData, leagueName, forceUpload } = req.body;
-    console.log(`[DEBUG] [extract-and-upload] Received DOM matchData records=${matchData?.length} league=${leagueName} force=${!!forceUpload}`);
-
-    // --- Setup Server-Sent Events ---
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
-    const send = (step, message, type = 'progress') => {
-        const payload = JSON.stringify({ step, message, type, ts: Date.now() });
-        res.write(`data: ${payload}\n\n`);
-        console.log(`[Extract-Upload] [${type.toUpperCase()}] ${step}: ${message}`);
-    };
-
-    const done = (data) => {
-        res.write(`data: ${JSON.stringify({ type: 'done', ...data })}\n\n`);
-        res.end();
-    };
-
-    const fail = (message) => {
-        res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
-        res.end();
-    };
-
-    try {
-        if (!matchData || !leagueName) return fail('Missing matchData array or leagueName in request body.');
-
-        send('init', `Target: DOM Data | League: ${leagueName}`);
-
-        const extractedData = matchData;
-
-        // ── Level 2: Game ID Deduplication ────────────────────────────────────
-        send('dedup', '🔄 Level 2: Running Game ID deduplication against local database...');
-        let allData = fs.existsSync(OUTPUT_DATA_PATH) ? JSON.parse(fs.readFileSync(OUTPUT_DATA_PATH)) : [];
-        let newRecords = 0; let dupeCount = 0;
-        extractedData.forEach(match => {
-            const isDupe = allData.some(e => e.gameId === match.gameId && e.league === match.league);
-            if (!isDupe) { allData.push(match); newRecords++; } else dupeCount++;
-        });
-        fs.writeFileSync(OUTPUT_DATA_PATH, JSON.stringify(allData, null, 2));
-        send('dedup', `✅ Dedup complete: ${newRecords} new records saved, ${dupeCount} duplicates discarded.`);
-
-        if (newRecords === 0) {
-            const localDbCount = allData.length;
-            return done({
-                skipped: false,
-                reason: `⚠️ All ${dupeCount} extracted records already exist in local DB. Database upload skipped. Use "🔄 Sync Local DB → Database" below to push all ${localDbCount} local records to Database.`,
-                uploaded: 0,
-                newRecords: 0,
-                localDbCount,
-                canSyncLocalDb: true,
-            });
-        }
-
-        // ── Database Upload ───────────────────────────────────────────────────
-        send('database', `🔥 Uploading ${newRecords} new records to Database Firestore...`);
-        const newMatchData = allData.slice(allData.length - newRecords);
-        const { uploaded, skipped } = await uploadMatchesToDatabase(newMatchData, (msg) => send('database', msg));
-
-        send('database', `✅ Database upload complete! ${uploaded} documents written, ${skipped} skipped.`);
-        done({ skipped: false, uploaded, newRecords, dupeCount });
-
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [/api/extract-and-upload]', err);
-        fail(`Server error: ${err.message}`);
-    }
-});
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2760,183 +1716,34 @@ app.post('/api/extract-and-upload', async (req, res) => {
 // Deletes a specific screenshot PNG (and its .meta.json if present).
 // Validates filename to prevent path traversal attacks.
 // ─────────────────────────────────────────────────────────────────────────────
-app.delete('/api/screenshots/:filename', (req, res) => {
-    try {
-        const { filename } = req.params;
-        console.log(`[DEBUG] [DELETE /api/screenshots] Request to delete: ${filename}`);
 
-        // Security: only allow .png filenames, no path traversal
-        if (!filename.endsWith('.png') || filename.includes('/') || filename.includes('..')) {
-            console.warn(`[DEBUG] [DELETE /api/screenshots] Rejected unsafe filename: ${filename}`);
-            return res.status(400).json({ success: false, error: 'Invalid filename. Only .png files allowed.' });
-        }
+/* Extracted delete /api/screenshots/:filename */
 
-        const dir = path.join(__dirname, 'testdownloadpage');
-        const filePath = path.join(dir, filename);
-        const metaPath = filePath.replace('.png', '.meta.json');
-
-        if (!fs.existsSync(filePath)) {
-            console.warn(`[DEBUG] [DELETE /api/screenshots] File not found: ${filePath}`);
-            return res.status(404).json({ success: false, error: 'Screenshot file not found.' });
-        }
-
-        // Delete the PNG
-        fs.unlinkSync(filePath);
-        console.log(`[DEBUG] [DELETE /api/screenshots] Deleted PNG: ${filename}`);
-
-        // Delete companion metadata if exists
-        if (fs.existsSync(metaPath)) {
-            fs.unlinkSync(metaPath);
-            console.log(`[DEBUG] [DELETE /api/screenshots] Deleted metadata: ${filename.replace('.png', '.meta.json')}`);
-        }
-
-        res.json({ success: true, deleted: filename });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [DELETE /api/screenshots]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/screenshots/process-pending
 // Loops through all pending .png files in the server directory
 // processes them explicitly and uploads to Database.
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/screenshots/process-pending', async (req, res) => {
-    try {
-        const dir = path.join(__dirname, 'testdownloadpage');
-        if (!fs.existsSync(dir)) return res.json({ success: true, processed: 0, skipped: 0, errors: [] });
 
-        const files = fs.readdirSync(dir).filter(f => f.endsWith('.png'));
-        console.log(`[Pending Process] Found ${files.length} PNG file(s) to process.`);
+/* Extracted post /api/screenshots/process-pending */
 
-        let processedCount = 0;
-        let skippedCount   = 0;
-        const errors       = [];
-
-        const { extractMatchDataFromImage } = require('./ai_router');
-        const { uploadMatchesToDatabase }   = require('./db_uploader');
-
-        for (const filename of files) {
-            const filePath = path.join(dir, filename);
-            const metaPath = filePath.replace('.png', '.meta.json');
-
-            // ── Resolve league from companion meta file ────────────────────────
-            let league = 'England - Virtual'; // safe default
-            if (fs.existsSync(metaPath)) {
-                try {
-                    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-                    league = meta.dbLeague || meta.league || league;
-                } catch (metaErr) {
-                    console.warn(`[Pending Process] ⚠️ Could not parse meta for ${filename}: ${metaErr.message}`);
-                }
-            } else {
-                console.warn(`[Pending Process] ⚠️ No meta file found for ${filename} — using default league: ${league}`);
-            }
-
-            console.log(`[Pending Process] 🔍 Extracting: ${filename} | league: ${league}`);
-
-            try {
-                const { matches: matchRows, totalPages } = await extractMatchDataFromImage(filePath, league);
-
-                if (matchRows && matchRows.length > 0) {
-                    // ai_router handles provider selection — just upload the result here explicitly
-                    const { uploaded, skipped } = await uploadMatchesToDatabase(
-                        matchRows,
-                        (msg) => console.log(`[Pending Process → Database] ${msg}`)
-                    );
-                    console.log(`[Pending Process] ✅ ${filename}: ${uploaded} uploaded | ${skipped} skipped (${totalPages} pages detected)`);
-
-                    // Clean up files only after successful upload
-                    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-                    if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
-                    processedCount++;
-                } else {
-                    console.warn(`[Pending Process] ⚠️ No matches extracted from ${filename}. File kept for retry.`);
-                    skippedCount++;
-                }
-            } catch (extractErr) {
-                console.error(`[Pending Process] ❌ Error processing ${filename}: ${extractErr.message}`);
-                errors.push({ filename, error: extractErr.message });
-                skippedCount++;
-            }
-        }
-
-        console.log(`[Pending Process] Done — ${processedCount} processed, ${skippedCount} skipped, ${errors.length} errors.`);
-        res.json({ success: true, processed: processedCount, skipped: skippedCount, errors });
-
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [POST /api/screenshots/process-pending]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/ai-provider  — returns the currently configured AI provider
 // POST /api/ai-provider — updates the active provider (claude | openai)
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/ai-provider', (req, res) => {
-    try {
-        console.log('[DEBUG] [GET /api/ai-provider] Reading AI config...');
-        const { readConfig } = require('./ai_router');
-        const config = readConfig();
-        console.log(`[DEBUG] [GET /api/ai-provider] Current provider: ${config.provider}`);
-        res.json({ success: true, ...config });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [GET /api/ai-provider]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
-app.post('/api/ai-provider', express.json(), (req, res) => {
-    try {
-        const { provider, claudeModel, openaiModel, geminiModel } = req.body ?? {};
-        console.log(`[DEBUG] [POST /api/ai-provider] Switching provider to: ${provider}`);
+/* Extracted get /api/ai-provider */
 
-        const VALID = ['claude', 'openai', 'gemini'];
-        if (!provider || !VALID.includes(provider.toLowerCase())) {
-            return res.status(400).json({ success: false, error: `Invalid provider. Must be one of: ${VALID.join(', ')}` });
-        }
 
-        const { writeConfig } = require('./ai_router');
-        const updates = { provider: provider.toLowerCase() };
-        if (claudeModel) updates.claudeModel = claudeModel;
-        if (openaiModel) updates.openaiModel = openaiModel;
-        if (geminiModel) updates.geminiModel = geminiModel;
 
-        const saved = writeConfig(updates);
-        console.log(`[DEBUG] [POST /api/ai-provider] ✅ Provider switched to: ${saved.provider}`);
-        res.json({ success: true, ...saved });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [POST /api/ai-provider]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+/* Extracted post /api/ai-provider */
 
-app.delete('/api/admin/league/:leagueName', async (req, res) => {
-    try {
-        const { leagueName } = req.params;
-        const { date } = req.query; // optional date DD/MM/YYYY
-        console.log(`[DEBUG] [DELETE /api/admin/league] Request to delete league: ${leagueName}${date ? ` on date ${date}` : ''}`);
 
-        if (!leagueName) {
-            return res.status(400).json({ success: false, error: 'League name is required' });
-        }
 
-        const stats = await deleteLeagueData(leagueName, date);
-        console.log(`[Admin] ✅ Deleted league ${leagueName} (date: ${date || 'ALL'}):`, stats);
-        
-        const scopeStr = date ? `for date ${date}` : 'and all historical records';
-        res.json({ 
-            success: true, 
-            message: `Successfully removed ${leagueName} ${scopeStr}.`, 
-            stats 
-        });
-    } catch (err) {
-        console.error('[Database Index Debug/Error Details]: [DELETE /api/admin/league]', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+/* Extracted delete /api/admin/league/:leagueName */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/pattern-intel
@@ -2948,789 +1755,60 @@ app.delete('/api/admin/league/:leagueName', async (req, res) => {
 //   minPct (optional) — minimum hit % threshold (default: 80)
 //   minSamples (optional) — minimum sample size (default: 8)
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/pattern-intel', async (req, res) => {
-    try {
-        const leagueFilter = req.query.league || null;
-        const minPct = parseFloat(req.query.minPct) || 80;
-        const minSamples = parseInt(req.query.minSamples) || 3;
 
-        console.log(`[PatternIntel] 🧠 Computing pattern intel — league=${leagueFilter || 'ALL'} minPct=${minPct}% minSamples=${minSamples}`);
+/* Extracted get /api/pattern-intel */
 
-        const allDocs = await getCachedDocs();
-        console.log(`[PatternIntel] Loaded ${allDocs.length} total match records from cache`);
-
-        // ── Step 1: Group all docs into per-team chronological histories ──────
-        const teamMatchMap = {}; // { [league]: { [team]: [...matchRecords sorted by date] } }
-
-        let minDate = null, maxDate = null;
-
-        for (const m of allDocs) {
-            if (!m.score || !/^\d+[:\-]\d+$/.test(m.score.trim())) continue;
-            const lg = m.league || 'Unknown';
-            if (leagueFilter && lg !== leagueFilter) continue;
-
-            const parts = m.date ? m.date.split('/') : null;
-            const time = m.time ? m.time.split(':') : ['0','0'];
-            const parsedDate = parts && parts.length === 3
-                ? new Date(parts[2], parts[1]-1, parts[0], parseInt(time[0])||0, parseInt(time[1])||0)
-                : new Date(0);
-
-            if (parsedDate.getTime() !== 0) {
-                if (!minDate || parsedDate < minDate) minDate = parsedDate;
-                if (!maxDate || parsedDate > maxDate) maxDate = parsedDate;
-            }
-
-            if (!teamMatchMap[lg]) teamMatchMap[lg] = {};
-
-            const addEntry = (team, isHome) => {
-                if (!team) return;
-                if (!teamMatchMap[lg][team]) teamMatchMap[lg][team] = [];
-                teamMatchMap[lg][team].push({ ...m, isHome, parsedDate });
-            };
-            addEntry(m.homeTeam, true);
-            addEntry(m.awayTeam, false);
-        }
-
-        // Sort each team's matches chronologically
-        for (const lg of Object.keys(teamMatchMap)) {
-            for (const team of Object.keys(teamMatchMap[lg])) {
-                teamMatchMap[lg][team].sort((a, b) => a.parsedDate - b.parsedDate);
-            }
-        }
-
-        // ── Step 2: Compute pattern statistics ────────────────────────────────
-        // patternStore[lg][score][role][team] = { total, nextWin, nextLoss, nextDraw, nextOver15, nextOver25, nextGG, nextHomeOver05, nextAwayOver05, triggers: [] }
-        const patternStore = {};
-
-        for (const lg of Object.keys(teamMatchMap)) {
-            patternStore[lg] = {};
-            for (const team of Object.keys(teamMatchMap[lg])) {
-                const matches = teamMatchMap[lg][team];
-                for (let i = 0; i < matches.length - 1; i++) {
-                    const cur = matches[i];
-                    const nxt = matches[i+1];
-                    const score = cur.score.replace('-', ':').trim();
-                    const role = cur.isHome ? 'Home' : 'Away';
-
-                    if (!patternStore[lg][score]) patternStore[lg][score] = {};
-                    if (!patternStore[lg][score][role]) patternStore[lg][score][role] = {};
-                    if (!patternStore[lg][score][role][team]) {
-                        patternStore[lg][score][role][team] = {
-                            total: 0, nextWin: 0, nextLoss: 0, nextDraw: 0,
-                            nextOver15: 0, nextOver25: 0, nextGG: 0,
-                            nextHomeOver05: 0, nextAwayOver05: 0,
-                            triggers: []
-                        };
-                    }
-
-                    const st = patternStore[lg][score][role][team];
-                    st.total++;
-
-                    const np = nxt.score.replace('-', ':').split(':').map(Number);
-                    const ngf = nxt.isHome ? np[0] : np[1];
-                    const nga = nxt.isHome ? np[1] : np[0];
-                    const ntg = ngf + nga;
-
-                    if (ngf > nga) st.nextWin++;
-                    else if (ngf < nga) st.nextLoss++;
-                    else st.nextDraw++;
-                    if (ntg > 1.5) st.nextOver15++;
-                    if (ntg > 2.5) st.nextOver25++;
-                    if (ngf > 0 && nga > 0) st.nextGG++;
-                    if (np[0] > 0) st.nextHomeOver05++;
-                    if (np[1] > 0) st.nextAwayOver05++;
-
-                    // Store the trigger (current match) and the next match together
-                    st.triggers.push({
-                        team,
-                        triggerDate: cur.date,
-                        triggerTime: cur.time,
-                        triggerScore: cur.score,
-                        triggerHomeTeam: cur.homeTeam,
-                        triggerAwayTeam: cur.awayTeam,
-                        triggerRole: role,
-                        nextDate: nxt.date,
-                        nextTime: nxt.time,
-                        nextScore: nxt.score,
-                        nextHomeTeam: nxt.homeTeam,
-                        nextAwayTeam: nxt.awayTeam,
-                        nextIsHome: nxt.isHome,
-                        parsedDate: cur.parsedDate
-                    });
-                }
-            }
-        }
-
-        // ── Step 3: Filter patterns that hit ≥ minPct% ──────────────────────
-        const elitePatterns = [];
-
-        for (const lg of Object.keys(patternStore).sort()) {
-            for (const score of Object.keys(patternStore[lg]).sort()) {
-                for (const role of ['Home', 'Away']) {
-                    if (!patternStore[lg][score][role]) continue;
-                    for (const team of Object.keys(patternStore[lg][score][role])) {
-                        const st = patternStore[lg][score][role][team];
-                        if (!st || st.total < minSamples) continue;
-
-                        const pct = (k) => Math.round((st[k] / st.total) * 100);
-                        const eliteOutcomes = [];
-
-                        const checkAdd = (key, label, emoji) => {
-                            const p = pct(key);
-                            if (p >= minPct) {
-                                eliteOutcomes.push({
-                                    key, label, emoji, pct: p,
-                                    hit: st[key], failed: st.total - st[key]
-                                });
-                            }
-                        };
-
-                        checkAdd('nextWin',       'Win',             '🏆');
-                        checkAdd('nextLoss',      'Loss',            '❌');
-                        checkAdd('nextDraw',      'Draw',            '🤝');
-                        checkAdd('nextOver15',    'Over 1.5',        '⚽');
-                        checkAdd('nextOver25',    'Over 2.5',        '🔥');
-                        checkAdd('nextGG',        'GG (BTTS)',       '🥅');
-                        checkAdd('nextHomeOver05','Home Scores',     '🏠');
-                        checkAdd('nextAwayOver05','Away Scores',     '✈️');
-
-                        if (eliteOutcomes.length === 0) continue;
-
-                        // Sort triggers by date descending — most recent first
-                        st.triggers.sort((a, b) => b.parsedDate - a.parsedDate);
-
-                        // Most recent trigger (the match we want to act on)
-                        const mostRecent = st.triggers[0] || null;
-
-                        elitePatterns.push({
-                            league: lg,
-                            score,
-                            role,
-                            team,
-                            sampleSize: st.total,
-                            eliteOutcomes,
-                            mostRecentTrigger: mostRecent,
-                            recentTriggers: st.triggers.slice(0, 5) // show 5 for context
-                        });
-                    }
-                }
-            }
-        }
-
-        // ── Step 4: Find LIVE ACTIVE Predictions for Today ─────────────────────
-        // We only show a pattern if a team's ABSOLUTE LATEST MATCH (played today)
-        // matches an elite pattern. This means their "next match" hasn't happened yet,
-        // making this a true live prediction for their upcoming fixture!
-        
-        const now = new Date();
-        const dd = String(now.getDate()).padStart(2, '0');
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const yyyy = now.getFullYear();
-        const todayStr = `${dd}/${mm}/${yyyy}`; // DD/MM/YYYY
-
-        const activeLivePatterns = [];
-
-        for (const lg of Object.keys(teamMatchMap)) {
-            for (const team of Object.keys(teamMatchMap[lg])) {
-                const matches = teamMatchMap[lg][team];
-                if (matches.length === 0) continue;
-
-                // The absolute latest match this team played
-                const latestMatch = matches[matches.length - 1];
-
-                // Only care if their latest match was played TODAY
-                if (latestMatch.date !== todayStr) continue;
-
-                const score = latestMatch.score.replace('-', ':').trim();
-                const role = latestMatch.isHome ? 'Home' : 'Away';
-
-                // Do they have an elite historical pattern for this score/role?
-                const st = patternStore[lg]?.[score]?.[role]?.[team];
-                if (!st || st.total < minSamples) continue;
-
-                const pct = (k) => Math.round((st[k] / st.total) * 100);
-                const eliteOutcomes = [];
-
-                const checkAdd = (key, label, emoji) => {
-                    const p = pct(key);
-                    if (p >= minPct) {
-                        eliteOutcomes.push({
-                            key, label, emoji, pct: p,
-                            hit: st[key], failed: st.total - st[key]
-                        });
-                    }
-                };
-
-                checkAdd('nextWin',       'Win',             '🏆');
-                checkAdd('nextLoss',      'Loss',            '❌');
-                checkAdd('nextDraw',      'Draw',            '🤝');
-                checkAdd('nextOver15',    'Over 1.5',        '⚽');
-                checkAdd('nextOver25',    'Over 2.5',        '🔥');
-                checkAdd('nextGG',        'GG (BTTS)',       '🥅');
-                checkAdd('nextHomeOver05','Home Scores',     '🏠');
-                checkAdd('nextAwayOver05','Away Scores',     '✈️');
-
-                // If they have elite outcomes, this is an ACTIVE LIVE PREDICTION!
-                if (eliteOutcomes.length > 0) {
-                    const mostRecent = {
-                        team,
-                        triggerDate: latestMatch.date,
-                        triggerTime: latestMatch.time,
-                        triggerScore: latestMatch.score,
-                        triggerHomeTeam: latestMatch.homeTeam,
-                        triggerAwayTeam: latestMatch.awayTeam,
-                        triggerRole: role,
-                        // No next match info because it hasn't happened yet!
-                    };
-
-                    // Re-sort historical triggers descending to show recent context
-                    // Only include triggers that have a resolved next match (exclude today's live one)
-                    st.triggers.sort((a, b) => b.parsedDate - a.parsedDate);
-                    const resolvedTriggers = st.triggers.filter(tr => tr.nextScore);
-
-                    activeLivePatterns.push({
-                        league: lg,
-                        score,
-                        role,
-                        team,
-                        sampleSize: st.total,
-                        eliteOutcomes,
-                        mostRecentTrigger: mostRecent,
-                        recentTriggers: resolvedTriggers.slice(0, 5) // show 5 historical examples with results
-                    });
-                }
-            }
-        }
-
-        console.log(`[PatternIntel] ✅ Found ${elitePatterns.length} total elite patterns — ${activeLivePatterns.length} LIVE predictions right now (${todayStr})`);
-
-        // Sort live patterns by their trigger time — most recently triggered first
-        activeLivePatterns.sort((a, b) => {
-            const tA = a.mostRecentTrigger?.triggerTime || '00:00';
-            const tB = b.mostRecentTrigger?.triggerTime || '00:00';
-            return tB.localeCompare(tA); // latest time first
-        });
-        console.log(`[PatternIntel] 🕐 Patterns sorted by trigger time. First: ${activeLivePatterns[0]?.team} @ ${activeLivePatterns[0]?.mostRecentTrigger?.triggerTime}`);
-
-        // ── Auto-save snapshot to MongoDB for historical browsing ──────────────
-        if (activeLivePatterns.length > 0) {
-            PatternSnapshot.bulkWrite(activeLivePatterns.map(p => {
-                const safe = (s) => String(s).replace(/[^a-zA-Z0-9]/g, '');
-                const id = `${todayStr}_${safe(p.league)}_${safe(p.team)}_${safe(p.score)}_${p.role}`;
-                return {
-                    updateOne: {
-                        filter: { _id: id },
-                        update: { $set: { snapshotDate: todayStr, ...p, savedAt: new Date() }, $setOnInsert: { resolved: false, outcomeResults: {} } },
-                        upsert: true,
-                    }
-                };
-            }), { ordered: false }).catch(e => console.warn('[PatternSnapshot] ⚠️ Auto-save failed (non-fatal):', e.message));
-        }
-
-        res.json({
-            success: true,
-            today: todayStr,
-            totalPatterns: activeLivePatterns.length,
-            totalAllTime: elitePatterns.length,
-            dataRange: {
-                from: minDate ? minDate.toDateString() : 'Unknown',
-                to: maxDate ? maxDate.toDateString() : 'Unknown'
-            },
-            patterns: activeLivePatterns,
-            config: { minPct, minSamples }
-        });
-
-    } catch (err) {
-        console.error('[PatternIntel] ❌ Error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/ai-predict-pattern
 // Uses the active AI to write a natural language prediction for the next fixture
 // based on the statistical pattern provided.
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/ai-predict-pattern', express.json(), async (req, res) => {
-    try {
-        const { pattern } = req.body;
-        if (!pattern || !pattern.team || !pattern.score) {
-            return res.status(400).json({ success: false, error: 'Pattern data is required' });
-        }
 
-        const { callPredictionAI, getActivePredictionProvider } = require('./prediction_ai');
-        const { computeTeamForm, getLeagueBaseline } = require('./db_reader');
-        const { getLeagueIntelligence } = require('./ai_memory');
-        
-        const activeProvider = getActivePredictionProvider();
+/* Extracted post /api/ai-predict-pattern */
 
-        const [teamForm, leagueBaseline, leagueIntel] = await Promise.all([
-            computeTeamForm(pattern.league, pattern.team),
-            getLeagueBaseline(pattern.league),
-            getLeagueIntelligence(pattern.league)
-        ]);
-
-        const prompt = `
-You are an elite, world-class sports betting algorithmic analyst. 
-Your goal is to synthesize multiple data points to guarantee an extraordinary, highly profitable betting prediction.
-
-1. PATTERN TRIGGER (PRIMARY SIGNAL)
-Team: ${pattern.team}
-League: ${pattern.league}
-Event: ${pattern.team} just played a match ending in ${pattern.score} as the ${pattern.role} team.
-When this exact scenario happens, historical data for their NEXT match shows:
-${pattern.eliteOutcomes.map(o => `- ${o.label}: ${o.pct}% probability (Hits: ${o.hit}, Fails: ${o.failed})`).join('\n')}
-(Sample Size: ${pattern.sampleSize} historical matches)
-
-2. CURRENT TEAM FORM (LAST 10 MATCHES)
-Streak: ${teamForm.streak}
-Win Rate: ${Math.round((teamForm.wins/(teamForm.matchesAnalysed||1))*100)}% (W${teamForm.wins} D${teamForm.draws} L${teamForm.losses})
-Avg Goals Scored: ${teamForm.goalsScored} / Avg Conceded: ${teamForm.goalsConceded}
-Over 2.5 Hit Rate: ${teamForm.over2_5_percent}% / BTTS Hit Rate: ${teamForm.btts_percent}%
-
-3. LEAGUE DNA & TACTICAL INTELLIGENCE
-League Baseline Avg Goals: ${leagueBaseline?.stats?.avgGoals || 'N/A'}
-League Over 2.5 Rate: ${leagueBaseline?.stats?.over2_5Percent || 'N/A'}%
-AI Tactical Intel: ${leagueIntel?.tacticalSummary || 'No tactical intel available.'}
-
-INSTRUCTIONS:
-Synthesize the Pattern Trigger with the Team Form and League DNA to provide a true expert edge. 
-Do NOT just blindly repeat the stats. Cross-reference the pattern with their current actual form and league tendencies to validate or challenge the primary signal.
-Write a very brief, punchy, expert-level betting recommendation (2-3 sentences max).
-Focus on the most mathematically sound and logical outcome.
-Return ONLY the recommendation text, no formatting, no JSON, no preamble.
-`;
-
-        console.log(`[PatternIntel] 🤖 Asking ${activeProvider} to predict pattern for ${pattern.team}...`);
-        
-        const result = await callPredictionAI(prompt, activeProvider, {
-            temperature: 0.7,
-            maxTokens: 150
-        });
-
-        res.json({ success: true, prediction: result.content.trim(), provider: activeProvider });
-
-    } catch (err) {
-        console.error('[PatternIntel] ❌ AI Prediction Error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/pattern-intel/upcoming-ai-analysis
 // Analyzes the best active patterns against real-time upcoming fixtures using AI.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/pattern-intel/upcoming-ai-analysis', async (req, res) => {
-    try {
-        console.log('[Upcoming AI] 🤖 Generating consolidated AI analysis for best upcoming fixtures...');
-        const minPct = 80;
-        
-        // 1. Fetch current active patterns
-        const port = process.env.PORT || 3001;
-        const patternRes = await fetch(`http://localhost:${port}/api/pattern-intel?minPct=${minPct}`);
-        const patternJson = await patternRes.json();
-        
-        if (!patternJson.success) throw new Error(patternJson.error || 'Failed to fetch pattern intel');
-        
-        let patterns = patternJson.patterns || [];
-        
-        // 2. Filter top patterns (must have elite outcomes > 80%)
-        patterns = patterns.filter(p => p.eliteOutcomes && p.eliteOutcomes.some(o => o.pct >= minPct));
-        
-        // Sort by highest probability outcome
-        patterns.sort((a, b) => {
-            const maxA = Math.max(...a.eliteOutcomes.map(o => o.pct));
-            const maxB = Math.max(...b.eliteOutcomes.map(o => o.pct));
-            return maxB - maxA;
-        });
-        
-        // 3. Cross-reference STRICTLY with the live list.
-        // Patterns are derived from completed results — the "next match" for each pattern
-        // team MUST be what is currently live. We never fall back to upcoming/betslip fixtures
-        // (globalData) because those haven't started yet and would give wrong predictions.
-        const liveListGames = await scrapeLiveListOnDemand();
-        const liveMatchCount = liveListGames.reduce((acc, g) => acc + (g.matches?.length || 0), 0);
-        console.log(`[Upcoming AI] Live list scraped: ${liveListGames.length} league groups, ${liveMatchCount} total live matches.`);
 
-        if (!liveListGames || liveListGames.length === 0 || liveMatchCount === 0) {
-            console.log('[Upcoming AI] Live list is empty — waiting for next match round.');
-            return res.json({
-                success: true,
-                message: 'The live list is empty right now. Waiting for the next match round to start (usually within 5 minutes).',
-                analyses: []
-            });
-        }
+/* Extracted get /api/pattern-intel/upcoming-ai-analysis */
 
-        const upcomingMatches = [];
-        const topPatterns = patterns.slice(0, 15); // Don't check too many
-
-        for (const pattern of topPatterns) {
-            let foundFixture = null;
-
-            // STRICTLY search the live list only — no globalData fallback
-            for (const group of liveListGames) {
-                const pCountry = pattern.league.split(' ')[0];
-                // Match by exact league name, or by the country prefix (e.g. "England"), or catch-all virtual groups
-                if (
-                    group.league !== pattern.league &&
-                    group.league !== 'vFootball Live Odds' &&
-                    group.league !== 'vFootball Live' &&
-                    (!group.league || !group.league.includes(pCountry))
-                ) continue;
-
-                const fixture = group.matches.find(m =>
-                    m.home?.includes(pattern.team) ||
-                    m.away?.includes(pattern.team) ||
-                    pattern.team.includes(m.home) ||
-                    pattern.team.includes(m.away)
-                );
-
-                if (fixture) {
-                    foundFixture = fixture;
-                    console.log(`[Upcoming AI] ✅ Pattern team "${pattern.team}" (${pattern.league}) is LIVE: ${fixture.home} vs ${fixture.away}`);
-                    break;
-                }
-            }
-
-            if (!foundFixture) {
-                console.log(`[Upcoming AI] ⏳ Pattern team "${pattern.team}" (${pattern.league}) not found in live list — skipping this round.`);
-                continue; // This team isn't playing yet — skip, don't pollute analysis
-            }
-
-            const isHome = foundFixture.home?.includes(pattern.team) || pattern.team.includes(foundFixture.home);
-            
-            let displayTime = 'LIVE';
-            if (foundFixture.status === 'IN-PLAY') {
-                displayTime = foundFixture.time ? `${foundFixture.time} (IN-PLAY)` : 'IN-PLAY';
-            } else if (foundFixture.status === 'UPCOMING') {
-                displayTime = foundFixture.time ? `${foundFixture.time} (Next)` : 'Next Match';
-            } else {
-                displayTime = foundFixture.time ? `${foundFixture.time} (LIVE)` : 'LIVE';
-            }
-
-            upcomingMatches.push({
-                pattern,
-                fixture: {
-                    time: displayTime,
-                    code: foundFixture.code || '',
-                    home: foundFixture.home,
-                    away: foundFixture.away,
-                    odds: foundFixture.score,
-                    teamRole: isHome ? 'Home' : 'Away',
-                    opponent: isHome ? foundFixture.away : foundFixture.home
-                }
-            });
-        }
-
-        // Take top 5 best live matches
-        const finalMatches = upcomingMatches.slice(0, 5);
-        console.log(`[Upcoming AI] ${finalMatches.length} live pattern matches found for AI analysis.`);
-
-        if (finalMatches.length === 0) {
-            return res.json({
-                success: true,
-                message: 'None of the elite pattern teams are currently live. The live list is active but no pattern team is playing right now — check back in a few minutes.',
-                analyses: []
-            });
-        }
-        
-        // 4. Send to AI
-        const { callPredictionAI, getActivePredictionProvider, parseAIJson } = require('./prediction_ai');
-        const activeProvider = getActivePredictionProvider();
-        
-        const matchDataStr = finalMatches.map((m, i) => `
-MATCH ${i+1}:
-Team with Pattern: ${m.pattern.team} (${m.pattern.league})
-Upcoming Fixture: ${m.fixture.home} vs ${m.fixture.away} (Time: ${m.fixture.time})
-Odds string: ${m.fixture.odds}
-Pattern Trigger: Just played ending in ${m.pattern.score} as ${m.pattern.role}.
-Historical Next Match Outcomes (Sample: ${m.pattern.sampleSize}):
-${m.pattern.eliteOutcomes.map(o => `- ${o.label}: ${o.pct}% probability`).join('\n')}
-`).join('\n');
-
-        const prompt = `
-You are an elite sports betting algorithmic analyst. 
-I am providing you with the top ${finalMatches.length} mathematically backed predictions for fixtures starting in the NEXT 5 MINUTES.
-Your task is to analyze these upcoming fixtures based on the historical pattern data.
-
-DATA:
-${matchDataStr}
-
-INSTRUCTIONS:
-Return a JSON array of analysis objects. DO NOT return markdown blocks around the JSON, just the raw JSON array.
-Each object in the array must have the following keys:
-- "match": string (e.g. "Chelsea vs Arsenal")
-- "time": string (The match starting time from the data provided)
-- "team": string (The team the pattern is about)
-- "league": string (The league name provided in the data, e.g. "England - Virtual")
-- "pattern": string (Brief summary of the pattern trigger)
-- "signal": string (The highest probability outcome, e.g. "Win (85%)")
-- "analysis": string (A punchy 2-3 sentence expert explanation synthesizing the pattern against the specific opponent. Be extremely confident and professional.)
-- "confidence": number (A score out of 100 based on the probability)
-- "color": string (A hex color code representing the outcome type: e.g. Win=#00FF88, Goals=#00E5FF)
-`;
-
-        const result = await callPredictionAI(prompt, activeProvider, {
-            temperature: 0.4,
-            maxTokens: 2000
-        });
-        
-        const analyses = parseAIJson(result.content);
-        
-        res.json({
-            success: true,
-            provider: activeProvider,
-            analyses: Array.isArray(analyses) ? analyses : [analyses]
-        });
-
-    } catch (err) {
-        console.error('[Upcoming AI] ❌ Error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/pattern-intel/save-snapshot
 // Called automatically when /api/pattern-intel runs — persists today's live
 // patterns into MongoDB so they can be browsed historically.
 // ─────────────────────────────────────────────────────────────────────────────
-app.post('/api/pattern-intel/save-snapshot', express.json(), async (req, res) => {
-    try {
-        const { patterns, snapshotDate } = req.body;
-        if (!patterns || !snapshotDate) {
-            return res.status(400).json({ success: false, error: 'patterns and snapshotDate required' });
-        }
-        console.log(`[PatternSnapshot] 💾 Saving ${patterns.length} pattern snapshots for ${snapshotDate}...`);
 
-        const ops = patterns.map(p => {
-            const safe = (s) => s.replace(/[^a-zA-Z0-9]/g, '');
-            const id = `${snapshotDate}_${safe(p.league)}_${safe(p.team)}_${safe(p.score)}_${p.role}`;
-            return {
-                updateOne: {
-                    filter: { _id: id },
-                    update: {
-                        $set: {
-                            snapshotDate,
-                            league: p.league,
-                            team: p.team,
-                            score: p.score,
-                            role: p.role,
-                            sampleSize: p.sampleSize,
-                            eliteOutcomes: p.eliteOutcomes,
-                            mostRecentTrigger: p.mostRecentTrigger,
-                            recentTriggers: p.recentTriggers || [],
-                            savedAt: new Date(),
-                        },
-                        $setOnInsert: { resolved: false, outcomeResults: {} }
-                    },
-                    upsert: true,
-                }
-            };
-        });
+/* Extracted post /api/pattern-intel/save-snapshot */
 
-        if (ops.length > 0) await PatternSnapshot.bulkWrite(ops, { ordered: false });
-        console.log(`[PatternSnapshot] ✅ Saved/updated ${ops.length} snapshots for ${snapshotDate}`);
-        res.json({ success: true, saved: ops.length });
-    } catch (err) {
-        console.error('[PatternSnapshot] ❌ Save error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/pattern-intel/dates
 // Returns all dates that have saved pattern snapshots, newest first.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/pattern-intel/dates', async (req, res) => {
-    try {
-        const dates = await PatternSnapshot.distinct('snapshotDate');
-        // Sort DD/MM/YYYY descending
-        dates.sort((a, b) => {
-            const parse = d => { const [dd,mm,yyyy] = d.split('/'); return new Date(`${yyyy}-${mm}-${dd}`); };
-            return parse(b) - parse(a);
-        });
-        console.log(`[PatternSnapshot] 📅 Found ${dates.length} snapshot dates`);
-        res.json({ success: true, dates });
-    } catch (err) {
-        console.error('[PatternSnapshot] ❌ dates error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/pattern-intel/dates */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/pattern-intel/history?date=DD/MM/YYYY
 // Returns all saved pattern snapshots for a given date.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/pattern-intel/history', async (req, res) => {
-    try {
-        const { date } = req.query;
-        if (!date) return res.status(400).json({ success: false, error: 'date query param required' });
-        console.log(`[PatternSnapshot] 📖 Fetching history for ${date}...`);
-        const docs = await PatternSnapshot.find({ snapshotDate: date }).lean();
-        console.log(`[PatternSnapshot] ✅ Found ${docs.length} snapshots for ${date}`);
-        res.json({ success: true, date, patterns: docs });
-    } catch (err) {
-        console.error('[PatternSnapshot] ❌ history error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+
+/* Extracted get /api/pattern-intel/history */
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/pattern-intel/performance
 // Computes the full performance overview across ALL resolved + unresolved
 // pattern snapshots. Shows per-outcome hit rates, streaks, and best patterns.
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/pattern-intel/performance', async (req, res) => {
-    try {
-        console.log('[PatternSnapshot] 📊 Computing performance overview...');
-        const allDocs = await PatternSnapshot.find({}).lean();
 
-        // ── Auto-resolve: check if team's next match exists in vfootball_results ──
-        const allResults = await getCachedDocs();
-        const todayStr = todayDDMMYYYY();
-        let autoResolved = 0;
+/* Extracted get /api/pattern-intel/performance */
 
-        for (const snap of allDocs) {
-            if (snap.resolved) continue;
-            // Find the next match for this team AFTER snapshotDate
-            const parseDate = (d) => { if (!d) return new Date(0); const [dd,mm,yyyy] = d.split('/'); return new Date(`${yyyy}-${mm}-${dd}`); };
-            const triggerDate = parseDate(snap.snapshotDate);
-
-            const teamMatches = allResults.filter(m =>
-                m.league === snap.league &&
-                (m.homeTeam === snap.team || m.awayTeam === snap.team) &&
-                m.score && /^\d+[:\-]\d+$/.test(m.score.trim())
-            );
-
-            const laterMatches = teamMatches.filter(m => parseDate(m.date) > triggerDate)
-                .sort((a, b) => parseDate(a.date) - parseDate(b.date));
-
-            if (laterMatches.length === 0) continue; // still pending
-
-            const nextMatch = laterMatches[0];
-            const parts = nextMatch.score.replace('-', ':').split(':').map(Number);
-            const isHome = nextMatch.homeTeam === snap.team;
-            const gf = isHome ? parts[0] : parts[1];
-            const ga = isHome ? parts[1] : parts[0];
-            const tg = gf + ga;
-
-            const resolvedOutcomes = {
-                win: gf > ga,
-                loss: gf < ga,
-                draw: gf === ga,
-                over15: tg > 1.5,
-                over25: tg > 2.5,
-                gg: gf > 0 && ga > 0,
-                homeScores: parts[0] > 0,
-                awayScores: parts[1] > 0,
-            };
-
-            const keyMap = { Win: 'win', Loss: 'loss', Draw: 'draw', 'Over 1.5': 'over15', 'Over 2.5': 'over25', 'GG (BTTS)': 'gg', 'Home Scores': 'homeScores', 'Away Scores': 'awayScores' };
-            const outcomeResults = {};
-            (snap.eliteOutcomes || []).forEach(o => {
-                const k = keyMap[o.label];
-                if (k !== undefined) outcomeResults[o.label] = resolvedOutcomes[k];
-            });
-
-            await PatternSnapshot.findByIdAndUpdate(snap._id, {
-                $set: {
-                    resolved: true,
-                    resolvedDate: nextMatch.date,
-                    resolvedScore: nextMatch.score,
-                    resolvedOutcomes,
-                    outcomeResults,
-                }
-            });
-            Object.assign(snap, { resolved: true, resolvedDate: nextMatch.date, resolvedScore: nextMatch.score, resolvedOutcomes, outcomeResults });
-            autoResolved++;
-        }
-
-        if (autoResolved > 0) console.log(`[PatternSnapshot] ✅ Auto-resolved ${autoResolved} pending snapshots`);
-
-        // ── Compute global statistics ──────────────────────────────────────────
-        const resolved = allDocs.filter(d => d.resolved);
-        const pending  = allDocs.filter(d => !d.resolved);
-
-        // Per-outcome aggregate stats
-        const outcomeStats = {};
-        const outcomeKeys = ['Win', 'Loss', 'Draw', 'Over 1.5', 'Over 2.5', 'GG (BTTS)', 'Home Scores', 'Away Scores'];
-        outcomeKeys.forEach(k => { outcomeStats[k] = { predictions: 0, hits: 0, misses: 0 }; });
-
-        for (const snap of resolved) {
-            const results = snap.outcomeResults || {};
-            for (const [label, hit] of Object.entries(results)) {
-                if (!outcomeStats[label]) outcomeStats[label] = { predictions: 0, hits: 0, misses: 0 };
-                outcomeStats[label].predictions++;
-                if (hit === true)  outcomeStats[label].hits++;
-                if (hit === false) outcomeStats[label].misses++;
-            }
-        }
-
-        const outcomeSummary = Object.entries(outcomeStats)
-            .filter(([, s]) => s.predictions > 0)
-            .map(([label, s]) => ({
-                label,
-                predictions: s.predictions,
-                hits: s.hits,
-                misses: s.misses,
-                hitRate: s.predictions > 0 ? Math.round((s.hits / s.predictions) * 100) : 0,
-            }))
-            .sort((a, b) => b.hitRate - a.hitRate);
-
-        // Per-date summary
-        const byDate = {};
-        for (const snap of resolved) {
-            const d = snap.snapshotDate;
-            if (!byDate[d]) byDate[d] = { date: d, total: 0, hits: 0, misses: 0 };
-            byDate[d].total++;
-            const r = snap.outcomeResults || {};
-            const allHit  = Object.values(r).every(v => v === true);
-            const anyMiss = Object.values(r).some(v => v === false);
-            if (allHit)  byDate[d].hits++;
-            if (anyMiss) byDate[d].misses++;
-        }
-        const dateSummary = Object.values(byDate).sort((a, b) => {
-            const parse = d => { const [dd,mm,yy] = d.split('/'); return new Date(`${yy}-${mm}-${dd}`); };
-            return parse(b.date) - parse(a.date);
-        });
-
-        // Best performing patterns (score+role combinations)
-        const patternPerf = {};
-        for (const snap of resolved) {
-            const key = `${snap.score}_${snap.role}_${snap.league}`;
-            if (!patternPerf[key]) patternPerf[key] = { score: snap.score, role: snap.role, league: snap.league, total: 0, hits: 0 };
-            patternPerf[key].total++;
-            const r = snap.outcomeResults || {};
-            if (Object.values(r).every(v => v === true)) patternPerf[key].hits++;
-        }
-        const topPatterns = Object.values(patternPerf)
-            .filter(p => p.total >= 2)
-            .map(p => ({ ...p, hitRate: Math.round((p.hits / p.total) * 100) }))
-            .sort((a, b) => b.hitRate - a.hitRate)
-            .slice(0, 10);
-
-        const totalPredictions = resolved.reduce((s, snap) => s + Object.keys(snap.outcomeResults || {}).length, 0);
-        const totalHits = resolved.reduce((s, snap) => s + Object.values(snap.outcomeResults || {}).filter(v => v === true).length, 0);
-
-        res.json({
-            success: true,
-            overview: {
-                totalSnapshots: allDocs.length,
-                resolvedSnapshots: resolved.length,
-                pendingSnapshots: pending.length,
-                totalPredictions,
-                totalHits,
-                overallHitRate: totalPredictions > 0 ? Math.round((totalHits / totalPredictions) * 100) : 0,
-            },
-            outcomeSummary,
-            dateSummary,
-            topPatterns,
-        });
-    } catch (err) {
-        console.error('[PatternSnapshot] ❌ performance error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // React Router catch-all — must be LAST route.
