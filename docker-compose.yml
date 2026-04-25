@@ -11,7 +11,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - MONGODB_URI=mongodb://mongo:27017/vfootball
+      - MONGO_URI=mongodb://mongo:27017/vfootball
       # Add valid API tokens here or in a separate .env file
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - SQUAD_SECRET_KEY=${SQUAD_SECRET_KEY}
