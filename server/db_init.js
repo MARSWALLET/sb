@@ -145,6 +145,10 @@ const telegramUserSchema = new mongoose.Schema({
     subscriptionTier: { type: String, enum: ['none', 'pro', 'vip'], default: 'none' },
     subscriptionExpiry: { type: Date, default: null },
     totalPredictionsRequested: { type: Number, default: 0 },
+    hasAcceptedTerms: { type: Boolean, default: false },
+    referredBy: { type: String, default: null }, // ID of whoever referred them
+    referralsCount: { type: Number, default: 0 },
+    totalReferralEarnings: { type: Number, default: 0 },
     joinedAt: { type: Date, default: Date.now }
 }, { strict: false });
 
@@ -165,6 +169,7 @@ const systemSettingsSchema = new mongoose.Schema({
     _id: String, // usually just 'global_config'
     normalPredictionCost: { type: Number, default: 1 },
     aiPredictionCost: { type: Number, default: 5 },
+    referralRewardPoints: { type: Number, default: 10 },
     pointsRates: { type: Object, default: { '100': 100, '500': 450, '1000': 800 } }, // Star/Currency cost per point pack
     subscriptionRates: { type: Object, default: { 'pro_monthly': 2500, 'vip_monthly': 5000 } },
     updatedAt: { type: Date, default: Date.now }
