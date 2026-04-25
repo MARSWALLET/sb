@@ -14,7 +14,7 @@ server/serviceAccountKey*.json
 
 # ── Built output ───────────────────────────────────────────────
 client/dist/
-server/public/
+
 
 # ── Runtime data files (regenerated at runtime) ────────────────
 server/processed_images_hash.json
