@@ -66,7 +66,10 @@ function App() {
           <div className="prediction-card slide-up">
             <div className="match-title">{prediction.league}</div>
             <div className="match-teams">{prediction.match}</div>
-            <div className="match-tip">{prediction.tip}</div>
+            <div className="match-tip-container">
+              <div className="match-tip">{prediction.tip}</div>
+              {prediction.tip.includes('%') ? null : <div className="match-confidence">High Probability</div>}
+            </div>
           </div>
         )}
       </main>

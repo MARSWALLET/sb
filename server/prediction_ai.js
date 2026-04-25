@@ -241,6 +241,72 @@ function parseAIJson(content) {
     throw new Error('Cannot parse AI response as JSON — check server logs for raw output');
 }
 
+// ── Implied Probability Math Engine ──────────────────────────────────────────────
+function calculateImpliedProbability(oddsString) {
+    // Expected format: "1(1.50) X(3.20) 2(5.00)" or similar
+    const result = { home: 0, draw: 0, away: 0, valid: false };
+    if (!oddsString) return result;
+
+    try {
+        // Extract numbers inside parenthesis
+        const matches = [...oddsString.matchAll(/\(([\d.]+)\)/g)];
+        if (matches.length >= 3) {
+            const odd1 = parseFloat(matches[0][1]);
+            const oddX = parseFloat(matches[1][1]);
+            const odd2 = parseFloat(matches[2][1]);
+
+            if (odd1 && oddX && odd2) {
+                // Implied Probability = (1 / decimal odds) * 100
+                const prob1 = (1 / odd1) * 100;
+                const probX = (1 / oddX) * 100;
+                const prob2 = (1 / odd2) * 100;
+                
+                // Margin (Overround) calculation
+                const totalMargin = prob1 + probX + prob2;
+
+                // True Probability = (Implied / Total Margin) * 100
+                result.home = Math.round((prob1 / totalMargin) * 100);
+                result.draw = Math.round((probX / totalMargin) * 100);
+                result.away = Math.round((prob2 / totalMargin) * 100);
+                result.valid = true;
+            }
+        }
+    } catch (err) {
+        console.warn('[PredictionAI] Failed to calculate implied probability:', err.message);
+    }
+    return result;
+}
+
+function generateSmartPrompt(league, home, away, oddsStr) {
+    const probs = calculateImpliedProbability(oddsStr);
+    let insights = '';
+
+    if (probs.valid) {
+        insights = `Mathematical Implied Probabilities based on Bookmaker Odds:
+- Home Win: ${probs.home}%
+- Draw: ${probs.draw}%
+- Away Win: ${probs.away}%
+
+Identify the highest value bet. If one team has >55% probability, consider a direct win or Over 1.5. 
+If probabilities are tight, consider Double Chance or Under 2.5/3.5 goals.`;
+    } else {
+        insights = `No valid odds provided. Rely on general team strength for this context.`;
+    }
+
+    return `Act as an elite virtual football quantitative analyst.
+Analyze the following live match:
+League: ${league}
+Match: ${home} vs ${away}
+Live Odds String: ${oddsStr}
+
+${insights}
+
+Calculate the best outcome based strictly on mathematical edge.
+Return ONLY a JSON object exactly like this:
+{"tip": "String (e.g. Over 2.5 Goals, 1X, Home Win)", "confidence": "String (e.g. 85%)"}
+Do not wrap in markdown \`\`\`json. Just the raw JSON object.`;
+}
+
 // ── Provider status (for the /api/ai-provider endpoint) ──────────────────────
 function getPredictionProviderStatus() {
     return {
@@ -263,6 +329,8 @@ function getPredictionProviderStatus() {
 module.exports = {
     callPredictionAI,
     parseAIJson,
+    calculateImpliedProbability,
+    generateSmartPrompt,
     getActivePredictionProvider,
     setActivePredictionProvider,
     getPredictionProviderStatus,

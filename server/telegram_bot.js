@@ -1,6 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { TelegramUser, SystemSettings } = require('./db_init');
-const { callPredictionAI, parseAIJson } = require('./prediction_ai');
+const { callPredictionAI, parseAIJson, generateSmartPrompt, calculateImpliedProbability } = require('./prediction_ai');
 require('dotenv').config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -176,11 +176,7 @@ if (bot) {
                             if (action === 'predict_ai') {
                                 bot.sendMessage(chatId, `🧠 Connecting to AI Core...\nAnalyzing ${match.home} vs ${match.away} in ${targetLeague}...`);
                                 try {
-                                    const prompt = `Act as an expert virtual football analyst. Analyze the following live match and provide a high-probability tip and a confidence percentage (between 70% and 99%).
-                                    League: ${targetLeague}
-                                    Match: ${match.home} vs ${match.away}
-                                    Current Score: ${match.score}
-                                    Return ONLY a JSON object exactly like this: {"tip": "String (e.g. Over 2.5 Goals, Home Win)", "confidence": "String (e.g. 85%)"}`;
+                                    const prompt = generateSmartPrompt(targetLeague, match.home, match.away, match.score);
                                     
                                     const aiResult = await callPredictionAI(prompt);
                                     const parsedDetails = parseAIJson(aiResult.content);
@@ -188,7 +184,7 @@ if (bot) {
                                     tipText = `🔍 **${typeName} Prediction Generated**\n\n` +
                                               `League: ${targetLeague}\n` +
                                               `Match: ${match.home} vs ${match.away}\n` +
-                                              `Score: ${match.score}\n\n` +
+                                              `Live Odds: \`${match.score}\`\n\n` +
                                               `💡 **Tip:** ${parsedDetails.tip}\n` +
                                               `📈 **Confidence:** ${parsedDetails.confidence}`;
                                 } catch (aiError) {
@@ -196,12 +192,22 @@ if (bot) {
                                     tipText = "⚠️ The AI Core is currently busy or down. Please try again or use Normal predict.";
                                 }
                             } else {
+                                const probs = calculateImpliedProbability(match.score);
+                                let fastTip = "Home or Away Win (12)";
+                                let conf = "75%";
+                                
+                                if (probs.valid) {
+                                    if (probs.home > 50) { fastTip = "Home Win (1) or 1X"; conf = `${probs.home + 15}%`; }
+                                    else if (probs.away > 50) { fastTip = "Away Win (2) or X2"; conf = `${probs.away + 15}%`; }
+                                    else { fastTip = "Under 3.5 Goals or Double Chance"; conf = "80%"; }
+                                }
+
                                 tipText = `🔍 **${typeName} Prediction Generated**\n\n` +
                                           `League: ${targetLeague}\n` +
                                           `Match: ${match.home} vs ${match.away}\n` +
-                                          `Score: ${match.score}\n\n` +
-                                          `Tip: Home to Score Next (1X) 📊\n` +
-                                          `Confidence: 70%`;
+                                          `Live Odds: \`${match.score}\`\n\n` +
+                                          `💡 **Tip:** ${fastTip} 📊\n` +
+                                          `📈 **Confidence:** ${conf}`;
                             }
                         }
                     }
