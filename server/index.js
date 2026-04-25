@@ -665,6 +665,37 @@ app.get('/api/debug/history-store', (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/debug/live-list  — Trigger a fresh live_list scrape and return raw data
+// Useful for diagnosing what the scraper actually sees on the live list page.
+// Returns: { leagues[], totalMatches, capturedAt }
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/debug/live-list', async (req, res) => {
+    try {
+        console.log('[DEBUG] [/api/debug/live-list] Triggering on-demand live list scrape...');
+        const liveListGames = await scrapeLiveListOnDemand();
+        const totalMatches = liveListGames.reduce((acc, g) => acc + (g.matches?.length || 0), 0);
+
+        console.log(`[DEBUG] [/api/debug/live-list] Got ${liveListGames.length} league groups, ${totalMatches} matches.`);
+        liveListGames.forEach(g => {
+            console.log(`  [Live List] League: "${g.league}" — ${g.matches?.length || 0} match(es)`);
+            g.matches?.forEach((m, i) => console.log(`    [${i + 1}] ${m.time} | ${m.home} vs ${m.away} | Code: ${m.code} | ${m.score}`));
+        });
+
+        res.json({
+            success: true,
+            capturedAt: new Date().toISOString(),
+            leagueGroups: liveListGames.length,
+            totalMatches,
+            data: liveListGames,
+        });
+    } catch (err) {
+        console.error('[DEBUG] [/api/debug/live-list] Error:', err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/admin/vfootball/sync-all
 // Orchestrates a high-speed native sync for all primary leagues.
