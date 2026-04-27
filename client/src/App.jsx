@@ -36,30 +36,50 @@ const ArrowRightIcon = () => (
 
 function App() {
   const [balance, setBalance] = useState('...');
-  const [prediction, setPrediction] = useState(null);
+  const [predictions, setPredictions] = useState(null); // Now an array
   const [loading, setLoading] = useState(false);
+  const [tgId, setTgId] = useState(null);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.ready();
       tg.expand();
-      setTimeout(() => setBalance('100'), 800);
+      
+      const user = tg.initDataUnsafe?.user;
+      if (user && user.id) {
+        setTgId(user.id);
+        fetch(`/api/webapp/user?tgId=${user.id}`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.balance !== undefined) setBalance(data.balance.toString());
+          })
+          .catch(e => console.error("Failed to fetch user state", e));
+      } else {
+        // Fallback for browser testing
+        setTgId('dev_test');
+        setBalance('DEV');
+      }
     }
   }, []);
 
-  const handlePredict = (type) => {
+  const handlePredict = async (type) => {
     setLoading(true);
-    setPrediction(null);
-    setTimeout(() => {
-      setPrediction({
-        league: "Virtual Premier League",
-        match: "Arsenal vs Chelsea",
-        tip: type === 'ai' ? "Home Win (89%)" : "Under 3.5 Goals"
-      });
-      setBalance(prev => (parseInt(prev) - (type === 'ai' ? 5 : 1)).toString());
-      setLoading(false);
-    }, 1500);
+    setPredictions(null);
+    try {
+      const res = await fetch(`/api/webapp/predict?tgId=${tgId}&type=${type}`, { method: 'POST' });
+      const data = await res.json();
+      
+      if (data.success && data.predictions) {
+        setPredictions(data.predictions);
+        setBalance(data.newBalance.toString());
+      } else {
+        alert(data.error || "Failed to fetch predictions. Not enough points?");
+      }
+    } catch (err) {
+      alert("Network Error");
+    }
+    setLoading(false);
   };
 
   return (
@@ -81,27 +101,27 @@ function App() {
       <main className="main-content">
         
         {/* Dynamic Hero Section */}
-        {!prediction && !loading && (
+        {!predictions && !loading && (
           <div className="hero">
             <h1 className="hero-title">Live Oracle</h1>
-            <p className="hero-subtitle">Mathematical insights for live virtual football matches.</p>
+            <p className="hero-subtitle">Batch Mathematical insights for live virtual football matches.</p>
           </div>
         )}
 
         {/* Action Buttons */}
-        {!prediction && !loading && (
+        {!predictions && !loading && (
           <div className="action-grid">
             <button className="btn btn-ai" onClick={() => handlePredict('ai')}>
               <div className="btn-content">
                 <BrainIcon />
-                <span>Deep Quant AI <small style={{opacity: 0.8, marginLeft: 4}}>(5 pts)</small></span>
+                <span>Deep Quant AI <small style={{opacity: 0.8, marginLeft: 4}}>(8 pts)</small></span>
               </div>
               <ArrowRightIcon />
             </button>
             <button className="btn btn-dark" onClick={() => handlePredict('normal')}>
               <div className="btn-content">
                 <ZapIcon />
-                <span>Fast Probability <small style={{opacity: 0.6, marginLeft: 4}}>(1 pt)</small></span>
+                <span>Fast Probability <small style={{opacity: 0.6, marginLeft: 4}}>(8 pts)</small></span>
               </div>
               <ArrowRightIcon />
             </button>
@@ -116,31 +136,38 @@ function App() {
           </div>
         )}
 
-        {/* Prediction Display */}
-        {prediction && (
-          <div className="result-section">
-            <div className="result-league">{prediction.league}</div>
-            <div className="result-match">{prediction.match}</div>
-            
-            <div className="result-tip-box">
-              <div className="result-tip-title">Recommended Edge</div>
-              <div className="result-tip-value">{prediction.tip}</div>
-            </div>
+        {/* Prediction Display (Batch) */}
+        {predictions && predictions.length > 0 && (
+          <div className="result-section" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <h3 style={{ margin: 0, paddingBottom: '10px', fontSize: '18px', borderBottom: '1px solid #eaeaea', textAlign: 'center', color: 'var(--text-primary)' }}>Oracle Batch Results</h3>
+            {predictions.map((pred, i) => (
+              <div key={i} className="result-card" style={{ background: '#f8f9fa', padding: '16px', borderRadius: '12px', border: '1px solid #eee' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600, marginBottom: '4px' }}>{pred.league || 'Virtual League'}</div>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a', marginBottom: '12px' }}>{pred.match}</div>
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', padding: '10px', borderRadius: '8px', fontSize: '14px', fontWeight: 700, color: '#4f46e5', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{pred.tip}</span>
+                  {pred.confidence && <span style={{ color: '#64748b' }}>{pred.confidence}</span>}
+                </div>
+              </div>
+            ))}
 
-            <div className="action-grid" style={{ padding: '40px 0 0 0' }}>
-               <button className="btn btn-dark" onClick={() => setPrediction(null)}>
-                  <span>Analyze Another Match</span>
+            <div className="action-grid" style={{ padding: '20px 0 0 0' }}>
+               <button className="btn btn-dark" onClick={() => setPredictions(null)}>
+                  <span>Analyze Another Batch</span>
                </button>
             </div>
           </div>
         )}
-
       </main>
 
       {/* Footer / Utilities */}
       <footer className="footer">
-        <button className="btn-buy" onClick={() => {/* Handle Squad / Stars */}}>
-          <WalletIcon /> Buy Computing Points
+        <button className="btn-buy" onClick={() => {
+          if (window.Telegram?.WebApp) {
+             window.Telegram.WebApp.close();
+          }
+        }}>
+          <WalletIcon /> Buy Points in Bot Menu
         </button>
       </footer>
       

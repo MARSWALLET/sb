@@ -88,6 +88,7 @@ app.use("/", require("./routes/ai")(globalsPass));
 app.use("/", require("./routes/intelligence")(globalsPass));
 app.use("/", require("./routes/admin_billing")(globalsPass));
 app.use("/", require("./routes/payments")(globalsPass));
+app.use("/", require("./routes/webapp")(globalsPass));
 
 // ── TELEGRAM BOT INITIALIZATION ──
 try {

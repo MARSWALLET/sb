@@ -2,6 +2,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const { TelegramUser, SystemSettings } = require('./db_init');
 const { callPredictionAI, parseAIJson, generateSmartPrompt, calculateImpliedProbability } = require('./prediction_ai');
 const { computeTeamForm, computeH2HForm } = require('./db_reader');
+const { sendOtpEmail } = require('./mailer');
+const { initiateSquadPayment } = require('./squad');
 require('dotenv').config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -37,9 +39,15 @@ async function authenticateUser(msg, refId = null) {
             username,
             pointsBalance: 0,
             subscriptionTier: 'none',
-            referredBy: refId
+            referredBy: refId,
+            botState: 'awaiting_email',
+            isEmailVerified: false
         });
         isNew = true;
+    } else if (!user.isEmailVerified && user.botState === 'none') {
+        // Legacy user who hasn't verified email yet
+        user.botState = 'awaiting_email';
+        await user.save();
     }
     return { user, isNew };
 }
@@ -110,11 +118,73 @@ if (bot) {
             }
         }
         
+        if (!user.isEmailVerified) {
+            user.botState = 'awaiting_email';
+            await user.save();
+            return bot.sendMessage(msg.chat.id, `🔒 **Account Verification Required**\n\nPlease enter your Email Address to register and secure your account.`, { parse_mode: 'Markdown' });
+        }
+
         if (!user.hasAcceptedTerms) {
             const terms = getTermsDisclaimer();
             bot.sendMessage(msg.chat.id, terms.text, { parse_mode: 'Markdown', reply_markup: terms.keyboard });
         } else {
             bot.sendMessage(msg.chat.id, `👋 Welcome back to vFootball AI, ${user.username}!\n\nGet live AI-powered predictions for virtual football matches right here.\n\nUse the menu below to get started.`, getMainMenu(user));
+        }
+    });
+
+    // Handle generic text messages (for Email & OTP states)
+    bot.on('message', async (msg) => {
+        if (!msg.text || msg.text.startsWith('/')) return; // Ignore commands
+
+        const { user } = await authenticateUser(msg);
+        const chatId = msg.chat.id;
+
+        if (user.botState === 'awaiting_email') {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const email = msg.text.trim();
+            
+            if (!emailRegex.test(email)) {
+                return bot.sendMessage(chatId, "❌ Invalid email format. Please enter a valid email address.");
+            }
+
+            bot.sendMessage(chatId, "⏳ Sending verification code...");
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
+            const expires = new Date(Date.now() + 10 * 60000); // 10 mins
+
+            const emailSent = await sendOtpEmail(email, otpCode);
+            if (emailSent) {
+                user.email = email;
+                user.otpCode = otpCode;
+                user.otpExpiresAt = expires;
+                user.botState = 'awaiting_otp';
+                await user.save();
+                bot.sendMessage(chatId, `✅ We've sent a 6-digit verification code to **${email}**.\n\nPlease reply with the code to verify your account.`, { parse_mode: 'Markdown' });
+            } else {
+                bot.sendMessage(chatId, "❌ Failed to send email. Please check the address or try again later.");
+            }
+        } 
+        else if (user.botState === 'awaiting_otp') {
+            const code = msg.text.trim();
+            
+            if (user.otpCode !== code || new Date() > user.otpExpiresAt) {
+                return bot.sendMessage(chatId, "❌ Invalid or expired verification code. Please try again.\n\n(Type /start to restart and enter a different email)");
+            }
+
+            // OTP valid
+            user.isEmailVerified = true;
+            user.botState = 'none';
+            user.otpCode = null;
+            await user.save();
+
+            bot.sendMessage(chatId, "🎉 **Email Verified Successfully!**", { parse_mode: 'Markdown' });
+
+            // Proceed to terms Disclaimer
+            if (!user.hasAcceptedTerms) {
+                const terms = getTermsDisclaimer();
+                bot.sendMessage(chatId, terms.text, { parse_mode: 'Markdown', reply_markup: terms.keyboard });
+            } else {
+                bot.sendMessage(chatId, `👋 Welcome to vFootball AI, ${user.username}!\n\nUse the menu below to get started.`, getMainMenu(user));
+            }
         }
     });
 
@@ -125,6 +195,10 @@ if (bot) {
         const action = query.data;
         const { user } = await authenticateUser(query.message);
         const settings = await getSettings();
+
+        if (!user.isEmailVerified) {
+            return bot.answerCallbackQuery(query.id, { text: "⚠️ You must verify your email address to continue. Send /start", show_alert: true });
+        }
 
         if (!user.hasAcceptedTerms && action !== 'accept_terms' && action !== 'decline_terms') {
             await bot.answerCallbackQuery(query.id, { text: "⚠️ You must accept the Terms of Service to continue.", show_alert: true });
@@ -145,11 +219,11 @@ if (bot) {
                 bot.answerCallbackQuery(query.id);
                 bot.editMessageText("❌ You have declined the Terms. The bot will not provide predictions unless you accept.", { chat_id: chatId, message_id: msgId });
             } else if (action === 'predict_ai' || action === 'predict_normal') {
-                const cost = action === 'predict_ai' ? settings.aiPredictionCost : settings.normalPredictionCost;
+                const cost = 8; // Unified Batch Cost
                 
                 if (!hasActiveSub && user.pointsBalance < cost) {
                     await bot.answerCallbackQuery(query.id, { text: `❌ Not enough points! Need ${cost} points.`, show_alert: true });
-                    return bot.sendMessage(chatId, `You need ${cost} points for this prediction. Buy points or subscribe!`, getMainMenu(user));
+                    return bot.sendMessage(chatId, `You need ${cost} points for this 8-Match Batch Oracle. Buy points or subscribe!`, getMainMenu(user));
                 }
 
                 if (!hasActiveSub) {
@@ -169,82 +243,84 @@ if (bot) {
                     const leagues = Object.keys(latestScrape);
                     
                     if (leagues.length > 0) {
-                        const targetLeague = leagues[Math.floor(Math.random() * leagues.length)];
-                        const matches = latestScrape[targetLeague];
-                        if (matches && matches.length > 0) {
-                            const match = matches[0];
+                        let matchBatch = [];
+                        for (let i = 0; i < 8; i++) {
+                            const targetLeagueKey = leagues[Math.floor(Math.random() * leagues.length)];
+                            const matches = latestScrape[targetLeagueKey];
+                            if (matches && matches.length > 0) {
+                                const matchObj = matches[Math.floor(Math.random() * matches.length)];
+                                matchBatch.push({ league: targetLeagueKey, ...matchObj });
+                            }
+                        }
+
+                        if (matchBatch.length > 0) {
+                            bot.sendMessage(chatId, `🔍 Found ${matchBatch.length} live games. Running batch computations...`);
                             
-                            // Fetch historical context concurrently from MongoDB
-                            const [homeFormData, awayFormData, h2hFormData] = await Promise.all([
-                                computeTeamForm(targetLeague, match.home, 10),
-                                computeTeamForm(targetLeague, match.away, 10),
-                                computeH2HForm(targetLeague, match.home, match.away, 10)
-                            ]);
-                            
-                            const homeFormStr = homeFormData.form || 'Unknown';
-                            const awayFormStr = awayFormData.form || 'Unknown';
-                            const h2hFormStr  = h2hFormData.form || 'Unknown';
+                            // Enhance with form
+                            let augmentedBatch = [];
+                            for (let mb of matchBatch) {
+                                const [home, away] = mb.match.split(' vs ').map(t => t.trim());
+                                const [homeFormData, awayFormData, h2hFormData] = await Promise.all([
+                                    computeTeamForm(mb.league, home, 10),
+                                    computeTeamForm(mb.league, away, 10),
+                                    computeH2HForm(mb.league, home, away, 10)
+                                ]);
+                                
+                                augmentedBatch.push({
+                                    league: mb.league,
+                                    home: home,
+                                    away: away,
+                                    match: mb.match,
+                                    oddsStr: mb.score, // The scraper stores odds in 'score' ironically
+                                    homeForm: homeFormData.form || 'Unknown',
+                                    awayForm: awayFormData.form || 'Unknown',
+                                    h2hForm: h2hFormData.form || 'Unknown'
+                                });
+                            }
 
                             if (action === 'predict_ai') {
-                                bot.sendMessage(chatId, `🧠 Connecting to AI Core...\nAnalyzing ${match.home} vs ${match.away} in ${targetLeague}...\n📚 Cross-referencing against database histories...`);
                                 try {
-                                    const prompt = generateSmartPrompt(targetLeague, match.home, match.away, match.score, homeFormStr, awayFormStr, h2hFormStr);
+                                    const { generateBatchSmartPrompt, callPredictionAI, parseAIJson } = require('./prediction_ai');
+                                    const prompt = generateBatchSmartPrompt(augmentedBatch);
                                     
                                     const aiResult = await callPredictionAI(prompt);
-                                    const parsedDetails = parseAIJson(aiResult.content);
+                                    const parsedArray = parseAIJson(aiResult.content);
 
-                                    tipText = `🔍 **${typeName} Prediction Generated**\n\n` +
-                                              `League: ${targetLeague}\n` +
-                                              `Match: ${match.home} vs ${match.away}\n` +
-                                              `Live Odds: \`${match.score}\`\n\n` +
-                                              `🔥 **Historical Form:**\n` +
-                                              `🏠 Home: ${homeFormStr}\n` +
-                                              `🏃 Away: ${awayFormStr}\n` +
-                                              `⚔️ H2H: ${h2hFormStr}\n\n` +
-                                              `💡 **Tip:** ${parsedDetails.tip}\n` +
-                                              `📈 **Confidence:** ${parsedDetails.confidence}`;
+                                    tipText = `🔍 **${typeName} Batch Output**\n\n`;
+                                    if (Array.isArray(parsedArray)) {
+                                        parsedArray.forEach(p => {
+                                             tipText += `🔹 *${p.match}*\nTip: ${p.tip} | Conf: ${p.confidence}\n\n`;
+                                        });
+                                    } else {
+                                        tipText += "Failed to parse batch JSON.";
+                                    }
                                 } catch (aiError) {
                                     console.error('[Bot AI Error]', aiError);
                                     tipText = "⚠️ The AI Core is currently busy or down. Please try again or use Normal predict.";
                                 }
                             } else {
-                                const probs = calculateImpliedProbability(match.score);
-                                let fastTip = "Home or Away Win (12)";
-                                let conf = "75%";
+                                const { calculateImpliedProbability } = require('./prediction_ai');
+                                tipText = `⚡ **${typeName} Fast Batch Output**\n\n`;
                                 
-                                if (probs.valid) {
-                                    // Math + Historical form synergy overrides
-                                    const homeWantsToWin = probs.home > 50;
-                                    const awayWantsToWin = probs.away > 50;
+                                for (let bt of augmentedBatch) {
+                                    const probs = calculateImpliedProbability(bt.oddsStr);
+                                    let fastTip = "Home or Away Win (12)";
+                                    let conf = "75%";
                                     
-                                    const homeHasGoodForm = homeFormStr.includes('W') && !homeFormStr.endsWith('LL');
-                                    const awayHasGoodForm = awayFormStr.includes('W') && !awayFormStr.endsWith('LL');
+                                    if (probs.valid) {
+                                        const homeWantsToWin = probs.home > 50;
+                                        const awayWantsToWin = probs.away > 50;
+                                        const homeHasGoodForm = bt.homeForm.includes('W') && !bt.homeForm.endsWith('LL');
+                                        const awayHasGoodForm = bt.awayForm.includes('W') && !bt.awayForm.endsWith('LL');
 
-                                    if (homeWantsToWin && homeHasGoodForm) { 
-                                        fastTip = "Home Win (1) or 1X"; 
-                                        conf = `${probs.home + 15}%`; 
+                                        if (homeWantsToWin && homeHasGoodForm) { fastTip = "Home Win (1) or 1X"; conf = `${probs.home + 15}%`; }
+                                        else if (awayWantsToWin && awayHasGoodForm) { fastTip = "Away Win (2) or X2"; conf = `${probs.away + 15}%`; }
+                                        else if ((homeWantsToWin && !homeHasGoodForm) || (awayWantsToWin && !awayHasGoodForm)) {
+                                            fastTip = "Over 1.5 Goals & GG (Trap avoided)"; conf = `88%`;
+                                        } else { fastTip = "Under 3.5 Goals or DC"; conf = "80%"; }
                                     }
-                                    else if (awayWantsToWin && awayHasGoodForm) { 
-                                        fastTip = "Away Win (2) or X2"; 
-                                        conf = `${probs.away + 15}%`; 
-                                    }
-                                    else if ((homeWantsToWin && !homeHasGoodForm) || (awayWantsToWin && !awayHasGoodForm)) {
-                                        // Trap identified (High probability but poor form)
-                                        fastTip = "Over 1.5 Goals & GG (Trap avoided)";
-                                        conf = `88%`;
-                                    }
-                                    else { 
-                                        fastTip = "Under 3.5 Goals or Double Chance"; 
-                                        conf = "80%"; 
-                                    }
+                                    tipText += `🔹 *${bt.match}*\nTip: ${fastTip} | Conf: ${conf}\n\n`;
                                 }
-
-                                tipText = `⚡ **${typeName} Fast Prediction**\n\n` +
-                                          `League: ${targetLeague}\n` +
-                                          `Match: ${match.home} vs ${match.away}\n` +
-                                          `Live Odds: \`${match.score}\`\n\n` +
-                                          `💡 **Tip:** ${fastTip} 📊\n` +
-                                          `📈 **Confidence:** ${conf}`;
                             }
                         }
                     }
@@ -257,9 +333,9 @@ if (bot) {
                 // Prompt user with point packages (can link to Squad API or send Telegram Stars invoice here)
                 const pointPackages = {
                     inline_keyboard: [
-                        [{ text: '⭐ 100 Points - 100 Stars', callback_data: 'purchase_stars_100' },
-                         { text: '⭐ 500 Points - 450 Stars', callback_data: 'purchase_stars_500' }],
-                        [{ text: '💳 500 Points - ₦2500 (Squad)', url: 'https://pay.squadco.com/vfootball500' }],
+                        [{ text: '⭐ 100 Points - 100 Stars', callback_data: 'purchase_stars_100' }],
+                        [{ text: '⭐ 500 Points - 450 Stars', callback_data: 'purchase_stars_500' }],
+                        [{ text: '💳 500 Points - ₦2500 (Squad)', callback_data: 'purchase_squad_500' }],
                         [{ text: '🔙 Back', callback_data: 'main_menu' }]
                     ]
                 };
@@ -280,6 +356,31 @@ if (bot) {
                     'XTR', // Telegram Stars Currency
                     pkgPrices
                 );
+            } else if (action === 'purchase_squad_500') {
+                bot.answerCallbackQuery(query.id, { text: "Generating secure checkout link..." });
+                try {
+                    const checkoutUrl = await initiateSquadPayment({
+                        email: user.email,
+                        amount: 250000, // 2500 NGN in Kobo
+                        telegramId: user._id,
+                        type: 'points',
+                        points: 500
+                    });
+                    
+                    bot.editMessageText(`💳 **Squad Checkout Ready**\n\nClick below to securely purchase 500 Points for ₦2,500. Your account will be credited automatically.`, { 
+                        chat_id: chatId, 
+                        message_id: msgId, 
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '➡️ Pay via Squad', url: checkoutUrl }],
+                                [{ text: '🔙 Back', callback_data: 'buy_points' }]
+                            ]
+                        }
+                    });
+                } catch (err) {
+                    bot.sendMessage(chatId, "⚠️ Failed to generate Squad payment link. Please try again later.");
+                }
             } else if (action === 'balance') {
                 bot.answerCallbackQuery(query.id, { text: `💰 Balance: ${user.pointsBalance} Points\n💎 Sub: ${user.subscriptionTier.toUpperCase()}`, show_alert: true });
             
@@ -288,7 +389,7 @@ if (bot) {
                 const subPackages = {
                     inline_keyboard: [
                         [{ text: '⭐ 1 Month PRO - 500 Stars', callback_data: 'purchase_stars_pro' }],
-                        [{ text: '💳 1 Month PRO - ₦2500 (Squad)', url: 'https://pay.squadco.com/vfootballpro' }],
+                        [{ text: '💳 1 Month PRO - ₦2500 (Squad)', callback_data: 'purchase_squad_pro' }],
                         [{ text: '🔙 Back', callback_data: 'main_menu' }]
                     ]
                 };
@@ -305,6 +406,30 @@ if (bot) {
                     'XTR',
                     [{ label: '1 Month PRO', amount: 500 }]
                 );
+            } else if (action === 'purchase_squad_pro') {
+                bot.answerCallbackQuery(query.id, { text: "Generating secure PRO checkout link..." });
+                try {
+                    const checkoutUrl = await initiateSquadPayment({
+                        email: user.email,
+                        amount: 250000, // 2500 NGN in Kobo
+                        telegramId: user._id,
+                        type: 'pro'
+                    });
+                    
+                    bot.editMessageText(`💎 **PRO Subscription Checkout**\n\nClick below to activate 1 Month PRO for ₦2,500. Your account will automatically upgrade.`, { 
+                        chat_id: chatId, 
+                        message_id: msgId, 
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '➡️ Pay via Squad', url: checkoutUrl }],
+                                [{ text: '🔙 Back', callback_data: 'subscribe' }]
+                            ]
+                        }
+                    });
+                } catch (err) {
+                    bot.sendMessage(chatId, "⚠️ Failed to generate Squad PRO link. Please try again later.");
+                }
             } else if (action === 'referral_system') {
                 bot.answerCallbackQuery(query.id);
                 try {

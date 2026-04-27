@@ -40,30 +40,48 @@ module.exports = function(globals) {
                 return res.status(200).send('Missing telegramId in metadata');
             }
 
-            const pointsToAdd = Number(MetaData.points || 0);
-
-            // Give the user their points
+            const type = MetaData.type || 'points';
             const user = await TelegramUser.findById(MetaData.telegramId);
-            if (user && pointsToAdd > 0) {
-                user.pointsBalance += pointsToAdd;
-                await user.save();
-                
-                // Track transaction internally
-                await Transaction.create({
-                    _id: TransactionRef,
-                    telegramId: MetaData.telegramId,
-                    amount: Amount,
-                    currency: 'NGN',
-                    method: 'squad_api',
-                    status: 'completed',
-                    type: 'points',
-                    itemBought: `${pointsToAdd} Points Pack via Squad`
-                });
 
-                // Notify user via Bot that payment was successful
-                const { bot } = require('../telegram_bot');
-                if (bot) {
-                    bot.sendMessage(user._id, `✅ Squad Payment Successful! You bought ${pointsToAdd} points.\n\nYour new balance is ${user.pointsBalance} PTS.`);
+            if (user) {
+                let itemBought = '';
+
+                if (type === 'points') {
+                    const pointsToAdd = Number(MetaData.points || 0);
+                    if (pointsToAdd > 0) {
+                        user.pointsBalance += pointsToAdd;
+                        itemBought = `${pointsToAdd} Points Pack via Squad`;
+                        
+                        const { bot } = require('../telegram_bot');
+                        if (bot) {
+                            bot.sendMessage(user._id, `✅ Squad Payment Successful! You bought ${pointsToAdd} points.\n\nYour new balance is ${user.pointsBalance} PTS.`);
+                        }
+                    }
+                } else if (type === 'pro') {
+                    user.subscriptionTier = 'pro';
+                    user.subscriptionExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+                    itemBought = '1 Month PRO Subscription via Squad';
+
+                    const { bot } = require('../telegram_bot');
+                    if (bot) {
+                        bot.sendMessage(user._id, `💎 Squad Payment Successful! You are now a PRO completely unrestricted for 30 days.`);
+                    }
+                }
+
+                await user.save();
+
+                // Track transaction internally
+                if (itemBought) {
+                    await Transaction.create({
+                        _id: TransactionRef,
+                        telegramId: MetaData.telegramId,
+                        amount: Amount,
+                        currency: 'NGN',
+                        method: 'squad_api',
+                        status: 'completed',
+                        type: type,
+                        itemBought: itemBought
+                    });
                 }
             }
 

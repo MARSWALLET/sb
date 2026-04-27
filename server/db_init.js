@@ -141,11 +141,22 @@ const PatternSnapshot = mongoose.models.PatternSnapshot || mongoose.model('Patte
 const telegramUserSchema = new mongoose.Schema({
     _id: String, // telegram chat ID
     username: String,
+    
+    // Auth & Identity
+    email: { type: String, default: null },
+    isEmailVerified: { type: Boolean, default: false },
+    otpCode: { type: String, default: null },
+    otpExpiresAt: { type: Date, default: null },
+    botState: { type: String, enum: ['none', 'awaiting_email', 'awaiting_otp'], default: 'none' },
+
+    // Financial
     pointsBalance: { type: Number, default: 0 },
     subscriptionTier: { type: String, enum: ['none', 'pro', 'vip'], default: 'none' },
     subscriptionExpiry: { type: Date, default: null },
     totalPredictionsRequested: { type: Number, default: 0 },
     hasAcceptedTerms: { type: Boolean, default: false },
+    
+    // Referrals
     referredBy: { type: String, default: null }, // ID of whoever referred them
     referralsCount: { type: Number, default: 0 },
     totalReferralEarnings: { type: Number, default: 0 },

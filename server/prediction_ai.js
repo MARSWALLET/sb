@@ -325,6 +325,31 @@ Return ONLY a JSON object exactly like this:
 Do not wrap in markdown \`\`\`json. Just the raw JSON object.`;
 }
 
+function generateBatchSmartPrompt(matchBatch) {
+    // matchBatch is array of { league, home, away, oddsStr, homeForm, awayForm, h2hForm }
+    let prompt = `Act as an elite virtual football quantitative trader. 
+Analyze the following ${matchBatch.length} live matches. For each, identify the absolute safest bet based strictly on mathematical implied probability and streak reality.\n\n`;
+
+    matchBatch.forEach((m, i) => {
+        const probs = calculateImpliedProbability(m.oddsStr);
+        let insights = '';
+        if (probs.valid) {
+            insights = `Home xG: ${probs.xG_home}, Away xG: ${probs.xG_away}, Overround: ${probs.overround}%`;
+        }
+        prompt += `[Match ${i+1}] ${m.league} - ${m.home} vs ${m.away}
+Odds: ${m.oddsStr}
+Forms: Home(10) [${m.homeForm}], Away(10) [${m.awayForm}], H2H [${m.h2hForm}]
+Maths: ${insights}\n\n`;
+    });
+
+    prompt += `Return ONLY a JSON array containing exactly ${matchBatch.length} objects. Do NOT use markdown code blocks (\`\`\`json). Return raw JSON array text exactly like this:
+[
+  { "match": "Home vs Away", "tip": "Over 2.5 Goals", "confidence": "85%" },
+  ...
+]`;
+    return prompt;
+}
+
 // ── Provider status (for the /api/ai-provider endpoint) ──────────────────────
 function getPredictionProviderStatus() {
     return {
@@ -349,6 +374,7 @@ module.exports = {
     parseAIJson,
     calculateImpliedProbability,
     generateSmartPrompt,
+    generateBatchSmartPrompt,
     getActivePredictionProvider,
     setActivePredictionProvider,
     getPredictionProviderStatus,
