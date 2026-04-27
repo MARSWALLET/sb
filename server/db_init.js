@@ -156,10 +156,11 @@ const telegramUserSchema = new mongoose.Schema({
     totalPredictionsRequested: { type: Number, default: 0 },
     hasAcceptedTerms: { type: Boolean, default: false },
     
-    // Referrals
+    // Referrals & Rewards
     referredBy: { type: String, default: null }, // ID of whoever referred them
     referralsCount: { type: Number, default: 0 },
     totalReferralEarnings: { type: Number, default: 0 },
+    lastBonusClaimDate: { type: Date, default: null },
     joinedAt: { type: Date, default: Date.now }
 }, { strict: false });
 

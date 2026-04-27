@@ -95,6 +95,9 @@ function getMainMenu(user) {
                     { text: '🤝 Invite & Earn', callback_data: 'referral_system' }
                 ],
                 [
+                    { text: '🎁 Claim Daily Bonus', callback_data: 'claim_bonus' }
+                ],
+                [
                     { text: `💰 Balance: ${user.pointsBalance} PTS`, callback_data: 'balance' },
                     { text: '💎 PRO', callback_data: 'subscribe' }
                 ]
@@ -480,8 +483,28 @@ if (bot) {
                         parse_mode: 'Markdown'
                     });
                 } catch (e) {
-                    bot.sendMessage(chatId, "Failed to fetch invite link. Please try again later.");
+                    console.error("Ref error", e);
                 }
+            } else if (action === 'claim_bonus') {
+                const now = new Date();
+                if (user.lastBonusClaimDate) {
+                    const hoursSinceLastClaim = Math.abs(now - user.lastBonusClaimDate) / 36e5;
+                    if (hoursSinceLastClaim < 24) {
+                        const hoursLeft = Math.ceil(24 - hoursSinceLastClaim);
+                        return bot.answerCallbackQuery(query.id, { 
+                            text: `⏳ You already claimed your bonus today! Come back in ${hoursLeft} hours.`, 
+                            show_alert: true 
+                        });
+                    }
+                }
+                
+                // Grant 10 points
+                user.pointsBalance += 10;
+                user.lastBonusClaimDate = now;
+                await user.save();
+                
+                bot.answerCallbackQuery(query.id, { text: '🎉 10 Points Daily Bonus Claimed!', show_alert: true });
+                bot.editMessageText(`👋 Welcome to vFootball AI, ${user.username}!\n\nGet live AI-powered predictions for virtual football matches right here.\n\nUse the menu below to get started.`, { chat_id: chatId, message_id: msgId, reply_markup: getMainMenu(user).reply_markup });
             } else if (action === 'main_menu') {
                 bot.answerCallbackQuery(query.id);
                 bot.editMessageText(`Welcome to vFootball AI!`, { chat_id: chatId, message_id: msgId, reply_markup: getMainMenu(user).reply_markup });

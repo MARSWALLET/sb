@@ -1,7 +1,7 @@
 const axios = require('axios');
 require('dotenv').config();
 
-const SQUAD_API_URL = process.env.SQUAD_SECRET_KEY?.startsWith('sandbox_') 
+const SQUAD_API_URL = process.env.SQUAD_SECRET_KEY && process.env.SQUAD_SECRET_KEY.startsWith('sandbox_') 
     ? 'https://sandbox-api-d.squadco.com/transaction/initiate'
     : 'https://api-d.squadco.com/transaction/initiate';
 

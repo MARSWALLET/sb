@@ -18,7 +18,7 @@ module.exports = function (globalsPass) {
         if (!tgId) return res.status(400).json({ error: 'Missing tgId' });
 
         try {
-            const user = await TelegramUser.findOne({ telegramId: tgId });
+            const user = await TelegramUser.findById(String(tgId));
             if (!user) {
                 return res.status(404).json({ error: 'User not found in vFootball DB' });
             }
@@ -39,7 +39,7 @@ module.exports = function (globalsPass) {
         if (!tgId) return res.status(400).json({ error: 'Missing tgId' });
 
         try {
-            const user = await TelegramUser.findOne({ telegramId: tgId });
+            const user = await TelegramUser.findById(String(tgId));
             if (!user) return res.status(404).json({ error: 'User not found' });
 
             const settings = await getSettings();
