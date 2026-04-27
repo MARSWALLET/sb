@@ -269,19 +269,15 @@ if (bot) {
                 const typeName = action === 'predict_ai' ? '🤖 AI Deep' : '⚡ Normal';
                 let tipText = "No live virtual games available right now for prediction. Try again later!";
                 
-                if (systemGlobals && systemGlobals.globalData && Object.keys(systemGlobals.globalData).length > 0) {
-                    const latestScrape = systemGlobals.globalData[0] || {};
-                    const leagues = Object.keys(latestScrape);
+                if (systemGlobals && systemGlobals.globalData && Array.isArray(systemGlobals.globalData) && systemGlobals.globalData.length > 0) {
+                    const validGroups = systemGlobals.globalData.filter(g => g.matches && g.matches.length > 0);
                     
-                    if (leagues.length > 0) {
+                    if (validGroups.length > 0) {
                         let matchBatch = [];
                         for (let i = 0; i < 8; i++) {
-                            const targetLeagueKey = leagues[Math.floor(Math.random() * leagues.length)];
-                            const matches = latestScrape[targetLeagueKey];
-                            if (matches && matches.length > 0) {
-                                const matchObj = matches[Math.floor(Math.random() * matches.length)];
-                                matchBatch.push({ league: targetLeagueKey, ...matchObj });
-                            }
+                            const group = validGroups[Math.floor(Math.random() * validGroups.length)];
+                            const matchObj = group.matches[Math.floor(Math.random() * group.matches.length)];
+                            matchBatch.push({ league: group.league, ...matchObj });
                         }
 
                         if (matchBatch.length > 0) {
@@ -290,7 +286,8 @@ if (bot) {
                             // Enhance with form
                             let augmentedBatch = [];
                             for (let mb of matchBatch) {
-                                const [home, away] = mb.match.split(' vs ').map(t => t.trim());
+                                const home = mb.home || (mb.match ? mb.match.split(' vs ')[0].trim() : 'Home');
+                                const away = mb.away || (mb.match ? mb.match.split(' vs ')[1].trim() : 'Away');
                                 const [homeFormData, awayFormData, h2hFormData] = await Promise.all([
                                     computeTeamForm(mb.league, home, 10),
                                     computeTeamForm(mb.league, away, 10),
@@ -301,7 +298,7 @@ if (bot) {
                                     league: mb.league,
                                     home: home,
                                     away: away,
-                                    match: mb.match,
+                                    match: mb.match || `${home} vs ${away}`,
                                     oddsStr: mb.score, // The scraper stores odds in 'score' ironically
                                     homeForm: homeFormData.form || 'Unknown',
                                     awayForm: awayFormData.form || 'Unknown',
