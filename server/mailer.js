@@ -1,14 +1,16 @@
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '465'),
-    secure: parseInt(process.env.SMTP_PORT || '465') === 465,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    }
-});
+function createTransporter() {
+    return nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+        port: parseInt(process.env.SMTP_PORT || '587'),
+        secure: false, // 587 uses STARTTLS
+        auth: {
+            user: process.env.SMTP_USER,  // Brevo login: 7a5e7d003@smtp-brevo.com
+            pass: process.env.SMTP_PASS
+        }
+    });
+}
 
 /**
  * Send an OTP email styled to match the vFootball Mini App UI
@@ -17,9 +19,13 @@ const transporter = nodemailer.createTransport({
  */
 async function sendOtpEmail(email, otp) {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        console.warn(`[Mailer] SMTP credentials not fully configured. Dev OTP code: ${otp}`);
-        return true; // non-blocking for dev
+        console.warn(`[Mailer] ⚠️  SMTP not configured — Dev OTP for ${email}: ${otp}`);
+        return true;
     }
+
+    // Verified sender address — must match a domain authorised in Brevo
+    const FROM_ADDRESS = process.env.SMTP_FROM || 'sportypredict@marspanel.site';
+    const transporter = createTransporter();
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -107,7 +113,7 @@ async function sendOtpEmail(email, otp) {
 </html>`;
 
     const mailOptions = {
-        from: `"vFootball AI" <${process.env.SMTP_USER}>`,
+        from: `"vFootball AI" <${FROM_ADDRESS}>`,
         to: email,
         subject: '🔐 Your vFootball Verification Code',
         text: `Your vFootball verification code is: ${otp}\n\nThis code expires in 10 minutes. Do not share it with anyone.`,
