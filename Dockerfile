@@ -3,10 +3,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-slim AS client-builder
 
+# Set up both workspaces so the vite outDir (../server/public) resolves correctly
+WORKDIR /app
+RUN mkdir -p client server/public
+
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm install
 COPY client/ ./
+# vite.config.js outputs to ../server/public → /app/server/public inside Docker
 RUN npm run build
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,8 +60,9 @@ RUN npm install --omit=dev
 # Copy server source
 COPY server/ ./
 
-# Copy built React frontend from stage 1 into server/public
-COPY --from=client-builder /app/client/dist ./public
+# Copy built React frontend from client-builder stage into server/public
+# (vite outputs to /app/server/public in the builder stage)
+COPY --from=client-builder /app/server/public ./public
 
 # Railway injects PORT at runtime
 ENV NODE_ENV=production
