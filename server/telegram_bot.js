@@ -1,10 +1,37 @@
 const TelegramBot = require('node-telegram-bot-api');
-const { TelegramUser, SystemSettings } = require('./db_init');
+const fs = require('fs');
+const path = require('path');
+const { TelegramUser, SystemSettings, Transaction } = require('./db_init');
 const { callPredictionAI, parseAIJson, generateSmartPrompt, calculateImpliedProbability } = require('./prediction_ai');
 const { computeTeamForm, computeH2HForm } = require('./db_reader');
 const { sendOtpEmail } = require('./mailer');
 const { initiateSquadPayment } = require('./squad');
 require('dotenv').config();
+
+// ── Admin Authority ───────────────────────────────────────────────────────────
+const ADMINS_FILE = path.join(__dirname, 'admins.json');
+const SUPER_ADMIN_ID = process.env.SUPER_ADMIN_ID || '5129381';
+
+function getSubAdmins() {
+    try {
+        const raw = fs.readFileSync(ADMINS_FILE, 'utf8');
+        return JSON.parse(raw);
+    } catch { return []; }
+}
+
+function saveSubAdmins(list) {
+    fs.writeFileSync(ADMINS_FILE, JSON.stringify(list, null, 2));
+}
+
+function isAdmin(chatId) {
+    const id = chatId.toString();
+    if (id === SUPER_ADMIN_ID) return true;
+    return getSubAdmins().includes(id);
+}
+
+function isSuperAdmin(chatId) {
+    return chatId.toString() === SUPER_ADMIN_ID;
+}
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 let bot = null;
@@ -219,11 +246,12 @@ if (bot) {
                 bot.answerCallbackQuery(query.id);
                 bot.editMessageText("❌ You have declined the Terms. The bot will not provide predictions unless you accept.", { chat_id: chatId, message_id: msgId });
             } else if (action === 'predict_ai' || action === 'predict_normal') {
-                const cost = 8; // Unified Batch Cost
+                // Read cost dynamically from SystemSettings so /admin cost commands take effect
+                const cost = action === 'predict_ai' ? settings.aiPredictionCost : settings.normalPredictionCost;
                 
                 if (!hasActiveSub && user.pointsBalance < cost) {
-                    await bot.answerCallbackQuery(query.id, { text: `❌ Not enough points! Need ${cost} points.`, show_alert: true });
-                    return bot.sendMessage(chatId, `You need ${cost} points for this 8-Match Batch Oracle. Buy points or subscribe!`, getMainMenu(user));
+                    await bot.answerCallbackQuery(query.id, { text: `❌ Not enough points! Need ${cost} points for this 8-Match batch.`, show_alert: true });
+                    return bot.sendMessage(chatId, `You need **${cost} points** for a Batch Oracle. Buy points or subscribe!`, { parse_mode: 'Markdown', ...getMainMenu(user) });
                 }
 
                 if (!hasActiveSub) {
@@ -528,6 +556,168 @@ if (bot) {
 
     bot.on('polling_error', (error) => {
         console.warn('[TelegramBot Polling Error]', error.message);
+    });
+
+    // ── /admin command router ─────────────────────────────────────────────────
+    // Usage:
+    //   /admin cost normal 8           - set normal prediction cost
+    //   /admin cost ai 5               - set AI prediction cost
+    //   /admin cost referral 15        - set referral reward points
+    //   /admin broadcast Hello all!    - send message to every verified user
+    //   /admin promote 123456789       - add sub-admin (super admin only)
+    //   /admin demote  123456789       - remove sub-admin (super admin only)
+    //   /admin grant 123456789 500     - manually credit a user points
+    //   /admin revoke 123456789        - set user points balance to 0
+    //   /admin stats                   - show platform statistics
+    //   /admin help                    - show this reference
+    bot.onText(/^\/admin(?:\s+(.+))?/, async (msg, match) => {
+        const chatId = msg.chat.id.toString();
+        const args = (match[1] || '').trim();
+
+        if (!isAdmin(chatId)) {
+            return bot.sendMessage(chatId, '⛔ Access denied. Admin privileges required.');
+        }
+
+        const parts = args.split(/\s+/);
+        const cmd = parts[0]?.toLowerCase();
+
+        try {
+            // ── /admin help ──────────────────────────────────────────────────
+            if (!cmd || cmd === 'help') {
+                const isSA = isSuperAdmin(chatId);
+                return bot.sendMessage(chatId,
+                    `🔐 *vFootball Admin Panel*\n\n` +
+                    `*Cost Controls:*\n` +
+                    `\`/admin cost normal <pts>\` — Normal batch cost\n` +
+                    `\`/admin cost ai <pts>\` — AI batch cost\n` +
+                    `\`/admin cost referral <pts>\` — Referral reward\n\n` +
+                    `*Users:*\n` +
+                    `\`/admin grant <ID> <pts>\` — Credit user\n` +
+                    `\`/admin revoke <ID>\` — Zero out user balance\n\n` +
+                    `*Broadcast:*\n` +
+                    `\`/admin broadcast <message>\` — Message all users\n\n` +
+                    `*Stats:*\n` +
+                    `\`/admin stats\` — Platform summary\n` +
+                    (isSA ? `\n*Super Admin Only:*\n\`/admin promote <ID>\`\n\`/admin demote <ID>\`` : ''),
+                    { parse_mode: 'Markdown' }
+                );
+            }
+
+            // ── /admin cost <type> <value> ───────────────────────────────────
+            if (cmd === 'cost') {
+                const type  = parts[1]?.toLowerCase();
+                const value = parseInt(parts[2]);
+                if (!type || isNaN(value) || value < 1) {
+                    return bot.sendMessage(chatId, '❌ Usage: `/admin cost normal|ai|referral <number>`', { parse_mode: 'Markdown' });
+                }
+                const settings = await getSettings();
+                if (type === 'normal')   settings.normalPredictionCost   = value;
+                else if (type === 'ai')  settings.aiPredictionCost        = value;
+                else if (type === 'referral') settings.referralRewardPoints = value;
+                else return bot.sendMessage(chatId, '❌ Unknown cost type. Use: normal | ai | referral');
+                settings.updatedAt = new Date();
+                await settings.save();
+                return bot.sendMessage(chatId, `✅ *${type.toUpperCase()} cost* updated to *${value} points*.`, { parse_mode: 'Markdown' });
+            }
+
+            // ── /admin broadcast <message> ───────────────────────────────────
+            if (cmd === 'broadcast') {
+                const message = parts.slice(1).join(' ');
+                if (!message) return bot.sendMessage(chatId, '❌ Usage: `/admin broadcast <message>`', { parse_mode: 'Markdown' });
+
+                bot.sendMessage(chatId, `📡 Starting broadcast to all verified users...`);
+                const users = await TelegramUser.find({ isEmailVerified: true });
+                let sent = 0, failed = 0;
+                for (const u of users) {
+                    try {
+                        await bot.sendMessage(u._id, `📢 *vFootball Announcement:*\n\n${message}`, { parse_mode: 'Markdown' });
+                        sent++;
+                        // Throttle to avoid Telegram flood limits
+                        await new Promise(r => setTimeout(r, 100));
+                    } catch { failed++; }
+                }
+                return bot.sendMessage(chatId, `✅ Broadcast complete.\n• Delivered: ${sent}\n• Failed: ${failed}`);
+            }
+
+            // ── /admin promote <id>  (super admin only) ──────────────────────
+            if (cmd === 'promote') {
+                if (!isSuperAdmin(chatId)) return bot.sendMessage(chatId, '⛔ Only the super admin can promote users.');
+                const targetId = parts[1];
+                if (!targetId) return bot.sendMessage(chatId, '❌ Usage: `/admin promote <telegramId>`', { parse_mode: 'Markdown' });
+                const admins = getSubAdmins();
+                if (admins.includes(targetId)) return bot.sendMessage(chatId, `⚠️ ${targetId} is already a sub-admin.`);
+                admins.push(targetId);
+                saveSubAdmins(admins);
+                bot.sendMessage(targetId, `🔑 You have been promoted to *vFootball Admin* by the Super Admin.`, { parse_mode: 'Markdown' }).catch(() => {});
+                return bot.sendMessage(chatId, `✅ *${targetId}* promoted to admin and saved to \`admins.json\`.`, { parse_mode: 'Markdown' });
+            }
+
+            // ── /admin demote <id>  (super admin only) ───────────────────────
+            if (cmd === 'demote') {
+                if (!isSuperAdmin(chatId)) return bot.sendMessage(chatId, '⛔ Only the super admin can demote admins.');
+                const targetId = parts[1];
+                if (!targetId) return bot.sendMessage(chatId, '❌ Usage: `/admin demote <telegramId>`', { parse_mode: 'Markdown' });
+                const admins = getSubAdmins().filter(id => id !== targetId);
+                saveSubAdmins(admins);
+                return bot.sendMessage(chatId, `✅ *${targetId}* has been demoted.`, { parse_mode: 'Markdown' });
+            }
+
+            // ── /admin grant <id> <points> ───────────────────────────────────
+            if (cmd === 'grant') {
+                const targetId = parts[1];
+                const amount   = parseInt(parts[2]);
+                if (!targetId || isNaN(amount) || amount < 1) {
+                    return bot.sendMessage(chatId, '❌ Usage: `/admin grant <telegramId> <points>`', { parse_mode: 'Markdown' });
+                }
+                const targetUser = await TelegramUser.findById(targetId);
+                if (!targetUser) return bot.sendMessage(chatId, `❌ User \`${targetId}\` not found in database.`, { parse_mode: 'Markdown' });
+                targetUser.pointsBalance += amount;
+                await targetUser.save();
+                bot.sendMessage(targetId, `🎁 An admin has credited you *+${amount} Points*!\nYour new balance: *${targetUser.pointsBalance} PTS*`, { parse_mode: 'Markdown' }).catch(() => {});
+                return bot.sendMessage(chatId, `✅ Granted *${amount} pts* to \`${targetId}\`. New balance: *${targetUser.pointsBalance} PTS*.`, { parse_mode: 'Markdown' });
+            }
+
+            // ── /admin revoke <id> ───────────────────────────────────────────
+            if (cmd === 'revoke') {
+                const targetId = parts[1];
+                if (!targetId) return bot.sendMessage(chatId, '❌ Usage: `/admin revoke <telegramId>`', { parse_mode: 'Markdown' });
+                const targetUser = await TelegramUser.findById(targetId);
+                if (!targetUser) return bot.sendMessage(chatId, `❌ User \`${targetId}\` not found.`, { parse_mode: 'Markdown' });
+                targetUser.pointsBalance = 0;
+                await targetUser.save();
+                return bot.sendMessage(chatId, `✅ Balance for \`${targetId}\` zeroed out.`, { parse_mode: 'Markdown' });
+            }
+
+            // ── /admin stats ─────────────────────────────────────────────────
+            if (cmd === 'stats') {
+                const totalUsers     = await TelegramUser.countDocuments();
+                const verifiedUsers  = await TelegramUser.countDocuments({ isEmailVerified: true });
+                const proUsers       = await TelegramUser.countDocuments({ subscriptionTier: 'pro', subscriptionExpiry: { $gt: new Date() } });
+                const totalTx        = await Transaction.countDocuments({ status: 'completed' });
+                const settings       = await getSettings();
+                const admins         = getSubAdmins();
+
+                return bot.sendMessage(chatId,
+                    `📊 *vFootball Platform Stats*\n\n` +
+                    `👥 Total Users: *${totalUsers}*\n` +
+                    `✅ Verified: *${verifiedUsers}*\n` +
+                    `💎 Active PRO: *${proUsers}*\n` +
+                    `💳 Transactions: *${totalTx}*\n\n` +
+                    `*Current Costs:*\n` +
+                    `⚡ Normal: *${settings.normalPredictionCost} pts*\n` +
+                    `🤖 AI: *${settings.aiPredictionCost} pts*\n` +
+                    `🤝 Referral: *${settings.referralRewardPoints} pts*\n\n` +
+                    `🔑 Sub-Admins: ${admins.length > 0 ? admins.join(', ') : 'None'}`,
+                    { parse_mode: 'Markdown' }
+                );
+            }
+
+            bot.sendMessage(chatId, `❓ Unknown admin command. Send \`/admin help\` for a full list.`, { parse_mode: 'Markdown' });
+
+        } catch (err) {
+            console.error('[Admin Command Error]', err);
+            bot.sendMessage(chatId, `❌ Command failed: ${err.message}`);
+        }
     });
 }
 

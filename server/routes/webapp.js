@@ -1,7 +1,13 @@
 const express = require('express');
-const { TelegramUser } = require('../db_init');
+const { TelegramUser, SystemSettings } = require('../db_init');
 const { callPredictionAI, parseAIJson, generateBatchSmartPrompt, calculateImpliedProbability } = require('../prediction_ai');
 const { computeTeamForm, computeH2HForm } = require('../db_reader');
+
+async function getSettings() {
+    let s = await SystemSettings.findById('global_config');
+    if (!s) s = await SystemSettings.create({ _id: 'global_config' });
+    return s;
+}
 
 module.exports = function (globalsPass) {
     const router = express.Router();
@@ -36,10 +42,11 @@ module.exports = function (globalsPass) {
             const user = await TelegramUser.findOne({ telegramId: tgId });
             if (!user) return res.status(404).json({ error: 'User not found' });
 
+            const settings = await getSettings();
             const hasActiveSub = user.subscriptionTier !== 'none' && user.subscriptionExpiry && new Date() < user.subscriptionExpiry;
             
-            // Per the logic discussed, 8 predictions costs 8 points.
-            const BATCH_COST = 8;
+            // Dynamic cost from admin-configurable SystemSettings
+            const BATCH_COST = type === 'ai' ? settings.aiPredictionCost : settings.normalPredictionCost;
             if (!hasActiveSub && user.pointsBalance < BATCH_COST) {
                 return res.status(400).json({ error: `Not enough points! Need ${BATCH_COST} points for a Batch Oracle.` });
             }
