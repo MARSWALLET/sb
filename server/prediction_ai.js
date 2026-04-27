@@ -79,10 +79,10 @@ const PREDICTION_PROVIDERS = {
 
 // ── Global active provider (session-level, changed via /api/ai-provider POST) ─
 let _activeProvider = (() => {
-    if (process.env.DEEPSEEK_API_KEY)  return 'deepseek';
-    if (GEMINI_KEYS.length > 0)        return 'gemini';
-    if (process.env.ANTHROPIC_API_KEY) return 'claude';
-    return 'deepseek';
+    if (GEMINI_KEYS.length > 0)         return 'gemini';
+    if (process.env.ANTHROPIC_API_KEY)  return 'claude';
+    if (process.env.DEEPSEEK_API_KEY)   return 'deepseek';
+    return 'gemini';
 })();
 
 console.log(`[PredictionAI] 🤖 Auto-selected provider: ${_activeProvider}`);
